@@ -5,7 +5,8 @@ the error per direction for: the classic 2D method, our raw 3D direction, and th
 Record in hand3d.html: hold each direction and its key (1-6) for ~5 s, then Export JSON.
   python3 tools/calib_hand.py hand_samples_*.json --out docs/slides/cam_calib.png
 
-Model: d' = normalize(W d + b), W 3x3 and b 3x1 fitted by least squares on the training samples.
+Model: d' = normalize(W d + b), fitted by least squares. 'region' uses two (W, b): one for directions towards /
+away from the screen (|d_z| > tau on the measured direction), one for sideways; tau is chosen on training data.
 Split: with 2+ files, the last file is the test set; with one file, the last 40% of each direction (in time).
 """
 import argparse, json, sys
@@ -62,32 +63,69 @@ else:
     te = [x[m] for x in (lab, raw, flat, t)]
 
 Ytr = np.array([TARGET[L] for L in tr[0]], float)
-Xtr = np.c_[tr[1], np.ones(len(tr[1]))]
-Wb, *_ = np.linalg.lstsq(Xtr, Ytr, rcond=None)                    # 4x3: rows 0-2 = W^T, row 3 = b
 Yte = np.array([TARGET[L] for L in te[0]], float)
-cal = unit(np.c_[te[1], np.ones(len(te[1]))] @ Wb)
+aff = lambda X: np.c_[X, np.ones(len(X))]
+
+
+def lsq(X, Y):                                                     # 4x3: rows 0-2 = W^T, row 3 = b
+    return np.linalg.lstsq(aff(X), Y, rcond=None)[0]
+
+
+def fit_region(X, Y, tau):
+    """Two corrections, picked by the MEASURED direction (never the label): |d_z| > tau = towards / away from
+    the screen, else sideways."""
+    g = np.abs(X[:, 2]) > tau
+    Wf = lsq(X[g], Y[g]) if g.sum() > 20 else lsq(X, Y)
+    Ws = lsq(X[~g], Y[~g]) if (~g).sum() > 20 else lsq(X, Y)
+    return lambda Z: unit(np.where((np.abs(Z[:, 2]) > tau)[:, None], aff(Z) @ Wf, aff(Z) @ Ws)), (Wf, Ws)
+
+
+# the gate tau is chosen on the training set only (inner time split), then refit on all training samples
+inner = np.zeros(len(tr[0]), bool)
+for L in np.unique(tr[0]):
+    idx = np.where(tr[0] == L)[0]
+    idx = idx[np.argsort(tr[3][idx])]
+    inner[idx[int(len(idx) * 0.6):]] = True
+taus = np.arange(0.40, 0.951, 0.05)
+cv = [ang(fit_region(tr[1][~inner], Ytr[~inner], tau)[0](tr[1][inner]), Ytr[inner]).mean() for tau in taus]
+tau = float(taus[int(np.argmin(cv))])
+region, (Wf, Ws) = fit_region(tr[1], Ytr, tau)
+Wb = lsq(tr[1], Ytr)
+glob = unit(aff(te[1]) @ Wb)
+reg = region(te[1])
 
 order = [L for L in TARGET if L in set(te[0])]
 res = {}
-for L in order:
-    k = te[0] == L
-    res[L] = {"n_test": int(k.sum()),
-              "2d": float(ang(te[2][k], Yte[k]).mean()),
-              "raw3d": float(ang(te[1][k], Yte[k]).mean()),
-              "cal3d": float(ang(cal[k], Yte[k]).mean())}
-allk = np.ones(len(te[0]), bool)
-res["all"] = {"n_test": int(allk.sum()), "2d": float(ang(te[2], Yte).mean()),
-              "raw3d": float(ang(te[1], Yte).mean()), "cal3d": float(ang(cal, Yte).mean())}
+for L in order + ["all"]:
+    k = te[0] == L if L != "all" else np.ones(len(te[0]), bool)
+    res[L] = {"n_test": int(k.sum()), "2d": float(ang(te[2][k], Yte[k]).mean()),
+              "raw3d": float(ang(te[1][k], Yte[k]).mean()), "global3d": float(ang(glob[k], Yte[k]).mean()),
+              "region3d": float(ang(reg[k], Yte[k]).mean())}
 
-print(f"train {len(tr[0])} samples, test {len(te[0])} samples")
-print(f"{'direction':18s} {'n':>5s} {'2D':>7s} {'3D raw':>7s} {'3D cal':>7s}   (mean angle error, deg)")
+print(f"train {len(tr[0])} samples, test {len(te[0])} samples, gate tau = {tau:.2f} (chosen on training data)")
+print(f"{'direction':18s} {'n':>5s} {'2D':>7s} {'3D raw':>7s} {'global':>7s} {'region':>7s}   (mean angle error, deg)")
 for L, r in res.items():
-    print(f"{L:18s} {r['n_test']:5d} {r['2d']:7.1f} {r['raw3d']:7.1f} {r['cal3d']:7.1f}")
-print("W =\n", np.round(Wb[:3].T, 3), "\nb =", np.round(Wb[3], 3))
+    print(f"{L:18s} {r['n_test']:5d} {r['2d']:7.1f} {r['raw3d']:7.1f} {r['global3d']:7.1f} {r['region3d']:7.1f}")
+
+# stricter check: fit on the 6 axis directions only, test on the 4 diagonals that were never used in fitting
+diag = ["up-left", "up-right", "down-left", "down-right"]
+lab_all = np.concatenate([tr[0], te[0]]); X_all = np.concatenate([tr[1], te[1]]); F_all = np.concatenate([tr[2], te[2]])
+Y_all = np.array([TARGET[L] for L in lab_all], float)
+ax6 = ~np.isin(lab_all, diag)
+unseen = None
+if (~ax6).any() and ax6.any():
+    reg6, _ = fit_region(X_all[ax6], Y_all[ax6], tau)
+    k = ~ax6
+    unseen = {"n": int(k.sum()), "2d": float(ang(F_all[k], Y_all[k]).mean()), "raw3d": float(ang(X_all[k], Y_all[k]).mean()),
+              "global3d": float(ang(unit(aff(X_all[k]) @ lsq(X_all[ax6], Y_all[ax6])), Y_all[k]).mean()),
+              "region3d": float(ang(reg6(X_all[k]), Y_all[k]).mean())}
+    print(f"unseen diagonals ({unseen['n']}): 2D {unseen['2d']:.1f}  raw {unseen['raw3d']:.1f}  "
+          f"global {unseen['global3d']:.1f}  region {unseen['region3d']:.1f}")
 
 out = Path(a.out)
 out.parent.mkdir(parents=True, exist_ok=True)
-json.dump({"results": res, "W": Wb[:3].T.tolist(), "b": Wb[3].tolist(), "files": a.files},
+json.dump({"results": res, "unseen_diagonals": unseen, "tau": tau, "W_global": Wb.tolist(),
+           "W_front_back": Wf.tolist(), "W_sideways": Ws.tolist(), "files": a.files},
           open(out.with_suffix(".json"), "w"), indent=1)
 
 import matplotlib
@@ -95,22 +133,21 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 plt.rcParams.update({"font.size": 13, "font.family": "DejaVu Sans"})
 INK, MUTED = "#1d1f24", "#6b6f78"
-series = [("2d", "Classic 2D (no depth)", "#eb6834"), ("raw3d", "Ours: 3D, raw", "#2a78d6"),
-          ("cal3d", "Ours: 3D, calibrated", "#1baf7a")]
+series = [("2d", "Classic 2D", "#eb6834"), ("region3d", "Ours: 3D + calibration", "#2a78d6")]
 cats = order + ["all"]
-x = np.arange(len(cats)); w = 0.26
+x = np.arange(len(cats)); w = 0.36
 fig, ax = plt.subplots(figsize=(12, 5.2))
 for i, (key, name, col) in enumerate(series):
     v = [res[c][key] for c in cats]
-    bars = ax.bar(x + (i - 1) * w, v, w - 0.03, color=col, label=name, zorder=3)
+    bars = ax.bar(x + (i - 0.5) * w, v, w - 0.04, color=col, label=name, zorder=3)
     for b_, val in zip(bars, v):
-        ax.text(b_.get_x() + b_.get_width() / 2, val + 1, f"{val:.0f}", ha="center", va="bottom", fontsize=10, color=INK)
+        ax.text(b_.get_x() + b_.get_width() / 2, val + 1, f"{val:.0f}", ha="center", va="bottom", fontsize=10.5, color=INK)
 ax.set_xticks(x, [SHORT.get(c, c) if c != "all" else "all\ndirections" for c in cats], color=INK)
 ax.set_ylabel("mean angle error on test samples (°)", color=MUTED)
 ax.grid(axis="y", color="#e6e6e3", zorder=0)
 ax.spines[["top", "right", "left"]].set_visible(False)
 ax.tick_params(axis="y", colors=MUTED, length=0)
-ax.legend(frameon=False, loc="upper right", ncol=3)
+ax.legend(frameon=False, loc="upper right", ncol=2)
 ax.set_ylim(0, max(100, max(res[c]["2d"] for c in cats) + 12))
 ax.set_title(f"Finger direction error per pointing direction ({res['all']['n_test']} test samples)", color=INK, loc="left")
 plt.tight_layout()
