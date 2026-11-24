@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+# MediaPipe runtime + model (~37 MB): ./tools/fetch_vendor.sh downloads them
+vendor/mediapipe/*
+!vendor/mediapipe/SHA256SUMS
+# when this folder sits inside a repo whose .gitignore drops *.bin / *.npy, keep the level files
+!levels/**/*.bin
+!*.bin

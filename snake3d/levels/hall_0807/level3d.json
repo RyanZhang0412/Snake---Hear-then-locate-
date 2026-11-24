@@ -1,0 +1,267 @@
+{
+ "name": "scene_0807_20-40s",
+ "source": "scene_0807_20-40s.pcd",
+ "frame": "metres; x right, y forward, z up; origin = arena centre on the floor",
+ "arena": {
+  "half_x": 5.6,
+  "half_y": 5.6,
+  "height": 2.0
+ },
+ "voxel": {
+  "size": 0.1,
+  "nx": 112,
+  "ny": 112,
+  "nz": 20,
+  "origin": [
+   -5.6,
+   -5.6,
+   0.0
+  ],
+  "order": "x fastest, then y, then z",
+  "values": "0 free, 1 solid, 2+i food object i (id i+1)"
+ },
+ "points": {
+  "file": "points.bin",
+  "n": 173188,
+  "layout": "float32 n*3 xyz, then uint8 n labels (0 scene, i food object id)"
+ },
+ "start": [
+  0.05,
+  0.05,
+  0.55
+ ],
+ "floor": {
+  "plane_abcd": [
+   0.01044,
+   -0.03277,
+   0.99941,
+   0.95251
+  ],
+  "tilt_deg": 1.97,
+  "inliers": 41318,
+  "inlier_ratio_of_slab": 0.531
+ },
+ "objects": [
+  {
+   "id": 1,
+   "points": 7917,
+   "voxels": 2328,
+   "reachable": true,
+   "center": [
+    4.032,
+    0.014,
+    0.653
+   ],
+   "top_m": 1.23,
+   "extent_m": 1.3
+  },
+  {
+   "id": 2,
+   "points": 5444,
+   "voxels": 1765,
+   "reachable": true,
+   "center": [
+    4.6,
+    -0.924,
+    0.7
+   ],
+   "top_m": 1.5,
+   "extent_m": 1.43
+  },
+  {
+   "id": 3,
+   "points": 3822,
+   "voxels": 1342,
+   "reachable": true,
+   "center": [
+    4.636,
+    1.166,
+    0.671
+   ],
+   "top_m": 1.5,
+   "extent_m": 0.8
+  },
+  {
+   "id": 4,
+   "points": 3205,
+   "voxels": 1819,
+   "reachable": true,
+   "center": [
+    4.019,
+    3.745,
+    0.752
+   ],
+   "top_m": 1.5,
+   "extent_m": 1.28
+  },
+  {
+   "id": 5,
+   "points": 2021,
+   "voxels": 1110,
+   "reachable": true,
+   "center": [
+    -3.158,
+    3.824,
+    0.783
+   ],
+   "top_m": 1.5,
+   "extent_m": 0.51
+  },
+  {
+   "id": 6,
+   "points": 1636,
+   "voxels": 783,
+   "reachable": true,
+   "center": [
+    -3.985,
+    3.052,
+    0.474
+   ],
+   "top_m": 0.88,
+   "extent_m": 0.62
+  },
+  {
+   "id": 7,
+   "points": 1889,
+   "voxels": 716,
+   "reachable": true,
+   "center": [
+    4.006,
+    3.154,
+    0.758
+   ],
+   "top_m": 1.5,
+   "extent_m": 0.5
+  },
+  {
+   "id": 8,
+   "points": 1889,
+   "voxels": 1715,
+   "reachable": true,
+   "center": [
+    -4.268,
+    1.616,
+    0.629
+   ],
+   "top_m": 0.9,
+   "extent_m": 1.68
+  },
+  {
+   "id": 9,
+   "points": 1326,
+   "voxels": 568,
+   "reachable": true,
+   "center": [
+    -4.811,
+    -2.24,
+    0.822
+   ],
+   "top_m": 1.07,
+   "extent_m": 0.79
+  },
+  {
+   "id": 10,
+   "points": 1445,
+   "voxels": 804,
+   "reachable": true,
+   "center": [
+    3.359,
+    4.17,
+    0.776
+   ],
+   "top_m": 1.5,
+   "extent_m": 0.45
+  },
+  {
+   "id": 11,
+   "points": 680,
+   "voxels": 484,
+   "reachable": true,
+   "center": [
+    -4.751,
+    0.024,
+    0.44
+   ],
+   "top_m": 0.75,
+   "extent_m": 0.63
+  },
+  {
+   "id": 12,
+   "points": 588,
+   "voxels": 834,
+   "reachable": true,
+   "center": [
+    3.821,
+    4.919,
+    0.69
+   ],
+   "top_m": 1.5,
+   "extent_m": 0.39
+  },
+  {
+   "id": 13,
+   "points": 423,
+   "voxels": 528,
+   "reachable": true,
+   "center": [
+    -1.581,
+    5.056,
+    0.681
+   ],
+   "top_m": 1.02,
+   "extent_m": 0.47
+  },
+  {
+   "id": 14,
+   "points": 302,
+   "voxels": 357,
+   "reachable": true,
+   "center": [
+    -4.554,
+    -1.058,
+    0.331
+   ],
+   "top_m": 0.42,
+   "extent_m": 0.69
+  },
+  {
+   "id": 15,
+   "points": 203,
+   "voxels": 11,
+   "reachable": false,
+   "center": [
+    -5.496,
+    2.362,
+    0.245
+   ],
+   "top_m": 0.46,
+   "extent_m": 0.33
+  }
+ ],
+ "params": {
+  "center": [
+   2.5,
+   -1.4
+  ],
+  "side": 11.2,
+  "yaw_deg": 90.0,
+  "voxel": 0.1,
+  "play_h": 2.0,
+  "band": [
+   0.05,
+   1.5
+  ],
+  "wall_band": [
+   1.8,
+   3.0
+  ],
+  "view_h": 3.0,
+  "view_voxel": 0.03,
+  "eps": 0.12,
+  "min_cluster_pts": 30,
+  "max_food_extent": 2.0,
+  "min_top": 0.25,
+  "solid_min_pts": 2,
+  "food_pad": 3
+ }
+}

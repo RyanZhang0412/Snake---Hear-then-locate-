@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hand 3D direction bench</title>
+<style>
+  body { margin: 0; background: #14161b; color: #ddd; font: 13px/1.45 system-ui, sans-serif; }
+  .row { display: flex; gap: 10px; padding: 10px 10px 0; align-items: flex-start; }
+  .panel { display: flex; gap: 10px; padding: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .card { background: #1b1e25; border-radius: 8px; padding: 10px; }
+  .card h2 { font-size: 13px; margin: 0 0 6px; color: #fff; font-weight: 600; }
+  .card .sub { color: #8a8f99; font-size: 11px; margin-bottom: 6px; max-width: 360px; }
+  canvas { display: block; border-radius: 6px; background: #0e1014; }
+  #cam { width: 420px; height: 315px; }
+  #v3d, #map { width: 340px; height: 340px; cursor: grab; }
+  #map { cursor: default; }
+  video { display: none; }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre; }
+  .big { font-size: 22px; color: #fff; font-family: ui-monospace, Consolas, monospace; }
+  label { margin-right: 10px; }
+  table { border-collapse: collapse; } td { padding: 1px 8px 1px 0; }
+  kbd { background: #2a2e38; border-radius: 3px; padding: 0 5px; font-size: 11px; }
+  tr.rec td { color: #ff6b6b; font-weight: bold; }
+  button { background: #2a2e38; color: #ddd; border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  #err { color: #f77; }
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="card">
+    <h2>Camera</h2>
+    <div class="sub" id="camlabel">starting...</div>
+    <canvas id="cam" width="640" height="480"></canvas>
+    <video id="vid" playsinline></video>
+    <div id="err"></div>
+  </div>
+  <div class="card">
+    <h2>3D view (drag to rotate, double-click to reset)</h2>
+    <div class="sub">red = your right, green = up, blue = towards the screen. Thick arrow = selected direction</div>
+    <canvas id="v3d" width="760" height="760"></canvas>
+  </div>
+  <div class="card">
+    <h2>Direction map, as you look at the screen</h2>
+    <div class="sub">center = pointing at the screen, middle ring = sideways / up / down, rim = pointing back at you.
+      Grey rings = 45° steps. Faint labels are references only, nothing is classified.</div>
+    <canvas id="map" width="760" height="760"></canvas>
+  </div>
+</div>
+<div class="panel">
+  <div class="card" style="width:420px">
+    <h2>Direction</h2>
+    <div>
+      <label><input type="radio" name="src" value="index" checked> index finger</label>
+      <label><input type="radio" name="src" value="hand"> whole hand</label>
+      <label><input type="radio" name="src" value="palm"> palm normal</label>
+    </div>
+    <div class="big" id="angles">yaw -  pitch -</div>
+    <div class="mono" id="nums">-</div>
+  </div>
+  <div class="card">
+    <h2>Smoothing (One Euro filter)</h2>
+    <div class="mono"><label><input type="checkbox" id="smooth" checked> on</label>
+min cutoff <input type="range" id="mincut" min="0.1" max="5" step="0.1" value="1.5"> <span id="vmincut">1.5</span> Hz
+beta       <input type="range" id="beta" min="0" max="0.5" step="0.01" value="0.05"> <span id="vbeta">0.05</span></div>
+    <div class="sub" style="margin-top:6px">Lower min cutoff = steadier but laggier.<br>Higher beta = less lag on fast moves.</div>
+  </div>
+  <div class="card">
+    <h2>Record samples</h2>
+    <div class="sub">Hold a direction, then hold its key while it records. Export saves every sample with the full
+      3D hand, so classification rules can be fitted to real data later.</div>
+    <table id="rectab"></table>
+    <div style="margin-top:6px"><button id="export">Export JSON</button> <button id="clear">Clear</button> <span id="recinfo"></span></div>
+  </div>
+</div>
+
+<script type="module">
+import { createHandLandmarker, openCamera, BONES } from "./hand_tracker.js";
+import { handDirections, toAngles, OneEuro3, toPlayer, norm } from "./hand_direction.js";
+
+const $ = id => document.getElementById(id);
+const LABELS = [["1", "forward (screen)"], ["2", "back (you)"], ["3", "left"], ["4", "right"], ["5", "up"], ["6", "down"],
+                ["7", "up-left"], ["8", "up-right"], ["9", "down-left"], ["0", "down-right"]];
+const COLORS = { index: "#ffc400", hand: "#4fd1ff", palm: "#ff5fd1" };
+const state = { src: "index", dirs: null, smoothed: null, world: null, trail: [], hand: null, fps: 0,
+                samples: [], recKey: null, counts: {}, view: { yaw: -0.55, pitch: 0.35 } };
+const filters = { index: new OneEuro3(), hand: new OneEuro3(), palm: new OneEuro3() };
+window.hand3d = state;   // for debugging / automated tests
+
+// ---------- UI wiring ----------
+document.querySelectorAll("input[name=src]").forEach(r => r.onchange = () => { state.src = r.value; state.trail = []; });
+for (const k of ["mincut", "beta"]) $(k).oninput = () => {
+  $("v" + k).textContent = $(k).value;
+  for (const f of Object.values(filters)) { f.mincutoff = +$("mincut").value; f.beta = +$("beta").value; }
+};
+$("rectab").innerHTML = LABELS.map(([k, n]) => `<tr id="r${k}"><td><kbd>${k}</kbd></td><td>${n}</td><td id="c${k}">0</td></tr>`).join("");
+addEventListener("keydown", e => { if (LABELS.some(([k]) => k === e.key)) { state.recKey = e.key; e.preventDefault(); } });
+addEventListener("keyup", e => { if (e.key === state.recKey) state.recKey = null; });
+$("clear").onclick = () => { state.samples = []; state.counts = {}; LABELS.forEach(([k]) => $("c" + k).textContent = 0); };
+$("export").onclick = () => {
+  const blob = new Blob([JSON.stringify({ meta: { camera: $("camlabel").textContent, date: new Date().toISOString(),
+    frame: "player: x right, y up, z towards the screen; world in metres around the hand centre",
+    labels: Object.fromEntries(LABELS) }, samples: state.samples })], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `hand_samples_${new Date().toISOString().slice(0, 19).replace(/:/g, "")}.json`; a.click();
+};
+
+// ---------- 3D view: hand-rolled projection on a 2D canvas ----------
+const v3 = $("v3d"), g3 = v3.getContext("2d");
+let drag = null;
+v3.onmousedown = e => drag = [e.clientX, e.clientY];
+addEventListener("mouseup", () => drag = null);
+addEventListener("mousemove", e => { if (!drag) return;
+  state.view.yaw += (e.clientX - drag[0]) * 0.01;
+  state.view.pitch = Math.max(-1.5, Math.min(1.5, state.view.pitch + (e.clientY - drag[1]) * 0.01));
+  drag = [e.clientX, e.clientY]; });
+v3.ondblclick = () => state.view = { yaw: -0.55, pitch: 0.35 };
+
+function project(p) {   // player frame -> canvas; viewer stands behind the player, looking at the screen
+  const { yaw, pitch } = state.view, cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = cy * p[0] - sy * p[2], z1 = sy * p[0] + cy * p[2];
+  const y2 = cp * p[1] - sp * z1, z2 = sp * p[1] + cp * z1;
+  const f = 3.2 / (3.2 + z2) , S = v3.width * 0.32;
+  return [v3.width / 2 + x1 * S * f, v3.height / 2 - y2 * S * f, z2];
+}
+function line3(a, b, col, w = 2, dash = []) {
+  const p = project(a), q = project(b);
+  g3.strokeStyle = col; g3.lineWidth = w; g3.setLineDash(dash);
+  g3.beginPath(); g3.moveTo(p[0], p[1]); g3.lineTo(q[0], q[1]); g3.stroke(); g3.setLineDash([]);
+}
+function arrow3(v, col, w) {
+  line3([0, 0, 0], v, col, w);
+  const q = project(v); g3.fillStyle = col; g3.beginPath(); g3.arc(q[0], q[1], w + 3, 0, 7); g3.fill();
+}
+function text3(p, s, col) { const q = project(p); g3.fillStyle = col; g3.font = "22px system-ui"; g3.fillText(s, q[0] + 6, q[1] - 6); }
+
+function draw3D() {
+  g3.clearRect(0, 0, v3.width, v3.height);
+  for (let k = 0; k < 3; k++) {   // unit circles in the three planes
+    g3.strokeStyle = "#2c313c"; g3.lineWidth = 1.5; g3.beginPath();
+    for (let i = 0; i <= 72; i++) {
+      const a = i / 72 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
+      const p = project(k === 0 ? [c, 0, s] : k === 1 ? [c, s, 0] : [0, c, s]);
+      i ? g3.lineTo(p[0], p[1]) : g3.moveTo(p[0], p[1]);
+    }
+    g3.stroke();
+  }
+  const ax = [[[1, 0, 0], "#ff5a5a", "right"], [[0, 1, 0], "#5ade6a", "up"], [[0, 0, 1], "#5a9bff", "screen"]];
+  for (const [v, c, n] of ax) { line3([0, 0, 0], v.map(x => x * 1.15), c, 2.5); line3([0, 0, 0], v.map(x => -x * 1.15), c, 1.5, [6, 6]); text3(v.map(x => x * 1.2), n, c); }
+  text3([0, 0, -1.25], "you", "#5a9bff");
+  if (state.world) {   // hand skeleton, ~0.2 m hand scaled to ~0.8 units
+    const P = state.world.map(p => p.map(v => v * 4));
+    for (const [a, b] of BONES) line3(P[a], P[b], "#9aa3b5", 2);
+  }
+  if (state.dirs) {
+    for (const k of ["index", "hand", "palm"]) if (k !== state.src) arrow3(state.dirs[k], COLORS[k] + "88", 2);
+    g3.fillStyle = COLORS[state.src];
+    state.trail.forEach((v, i) => { const q = project(v); g3.globalAlpha = i / state.trail.length; g3.beginPath(); g3.arc(q[0], q[1], 3, 0, 7); g3.fill(); });
+    g3.globalAlpha = 1;
+    arrow3(state.smoothed, COLORS[state.src], 6);
+  }
+}
+
+// ---------- direction map: azimuthal equidistant around "towards the screen" ----------
+const mp = $("map"), gm = mp.getContext("2d");
+const R = mp.width * 0.46, C0 = [mp.width / 2, mp.height / 2];
+function mapXY(v) {   // angle from forward -> radius, direction in the screen plane -> angle
+  const th = Math.acos(Math.max(-1, Math.min(1, v[2]))), ph = Math.atan2(v[1], v[0]);
+  return [C0[0] + R * (th / Math.PI) * Math.cos(ph), C0[1] - R * (th / Math.PI) * Math.sin(ph)];
+}
+const REFS = [["screen", [0, 0, 1]], ["right", [1, 0, 0]], ["left", [-1, 0, 0]], ["up", [0, 1, 0]], ["down", [0, -1, 0]],
+              ["up-right", norm([1, 1, 0])], ["up-left", norm([-1, 1, 0])], ["down-right", norm([1, -1, 0])], ["down-left", norm([-1, -1, 0])]];
+function drawMap() {
+  gm.clearRect(0, 0, mp.width, mp.height);
+  for (let deg = 45; deg <= 180; deg += 45) {
+    gm.strokeStyle = deg === 90 ? "#3b4250" : "#262b35"; gm.lineWidth = deg === 180 ? 3 : 1.5;
+    gm.beginPath(); gm.arc(C0[0], C0[1], R * deg / 180, 0, 7); gm.stroke();
+  }
+  gm.strokeStyle = "#262b35"; gm.lineWidth = 1.5;
+  for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; gm.beginPath(); gm.moveTo(...C0); gm.lineTo(C0[0] + R * Math.cos(a), C0[1] - R * Math.sin(a)); gm.stroke(); }
+  gm.font = "20px system-ui"; gm.textAlign = "center";
+  for (const [n, v] of REFS) { const [x, y] = mapXY(v); gm.fillStyle = "#5c6475"; gm.beginPath(); gm.arc(x, y, 5, 0, 7); gm.fill(); gm.fillText(n, x, y - 12); }
+  gm.fillStyle = "#5c6475"; gm.fillText("back (you) = rim", C0[0], mp.height - 6);
+  if (!state.smoothed) return;
+  gm.fillStyle = COLORS[state.src];
+  state.trail.forEach((v, i) => { const [x, y] = mapXY(v); gm.globalAlpha = i / state.trail.length * 0.8; gm.beginPath(); gm.arc(x, y, 4, 0, 7); gm.fill(); });
+  gm.globalAlpha = 1;
+  const [x, y] = mapXY(state.smoothed);
+  gm.beginPath(); gm.arc(x, y, 11, 0, 7); gm.fill(); gm.strokeStyle = "#fff"; gm.lineWidth = 2; gm.stroke();
+}
+
+// ---------- camera panel ----------
+const cv = $("cam"), gc = cv.getContext("2d");
+function drawCam(video, res, i) {
+  gc.save(); gc.translate(cv.width, 0); gc.scale(-1, 1);
+  gc.drawImage(video, 0, 0, cv.width, cv.height);
+  res.landmarks.forEach((lm, k) => {
+    gc.strokeStyle = k === i ? "#7dffb0" : "#8ab4ff"; gc.lineWidth = 3;
+    for (const [a, b] of BONES) { gc.beginPath(); gc.moveTo(lm[a].x * cv.width, lm[a].y * cv.height); gc.lineTo(lm[b].x * cv.width, lm[b].y * cv.height); gc.stroke(); }
+  });
+  gc.restore();
+  if (i != null && state.smoothed) {   // in-image arrow of the x/y part, dot size = towards-screen part
+    const lm = res.landmarks[i], o = state.src === "index" ? lm[8] : lm[9];
+    const x = (1 - o.x) * cv.width, y = o.y * cv.height, [vx, vy, vz] = state.smoothed;
+    gc.strokeStyle = COLORS[state.src]; gc.lineWidth = 5;
+    gc.beginPath(); gc.moveTo(x, y); gc.lineTo(x + vx * 110, y - vy * 110); gc.stroke();
+    gc.fillStyle = vz >= 0 ? COLORS[state.src] : "#5a9bff";
+    gc.beginPath(); gc.arc(x, y, 5 + 12 * Math.abs(vz), 0, 7); gc.fill();
+  }
+}
+
+// ---------- main loop ----------
+const fmt = v => v.map(x => (x >= 0 ? " " : "") + x.toFixed(2)).join(" ");
+try {
+  const hands = await createHandLandmarker(1);
+  const video = $("vid");
+  const { stream, label } = await openCamera({ cameraLabel: new URLSearchParams(location.search).get("camera") || undefined });
+  $("camlabel").textContent = label;
+  video.srcObject = stream; video.muted = true; await video.play();
+  let lastT = -1, frames = 0, fpsT = performance.now();
+  const loop = () => {
+    const now = performance.now();
+    if (video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime;
+      const res = hands.detectForVideo(video, now);
+      frames++; if (now - fpsT > 1000) { state.fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
+      if (res.worldLandmarks.length) {
+        const w = res.worldLandmarks[0], hd = res.handedness[0]?.[0]?.categoryName || "Right";
+        const d = handDirections(w, hd);
+        state.world = w.map(toPlayer); state.hand = hd; state.dirs = d;
+        const raw = d[state.src];
+        state.smoothed = $("smooth").checked ? filters[state.src].filter(raw, now) : raw;
+        for (const k of ["index", "hand", "palm"]) if (k !== state.src) filters[k].filter(d[k], now);
+        state.trail.push(state.smoothed); if (state.trail.length > 60) state.trail.shift();
+        const a = toAngles(state.smoothed), off = Math.acos(Math.max(-1, Math.min(1, state.smoothed[2]))) * 180 / Math.PI;
+        $("angles").textContent = `yaw ${a.yaw.toFixed(0).padStart(4)}°  pitch ${a.pitch.toFixed(0).padStart(3)}°`;
+        $("nums").textContent =
+          `vector (x right, y up, z screen)\n  ${fmt(state.smoothed)}\n` +
+          `off the screen axis ${off.toFixed(0)}°\n` +
+          `index ${fmt(d.index)}\nhand  ${fmt(d.hand)}\npalm  ${fmt(d.palm)}\n` +
+          `finger straightness ${d.straightness.toFixed(2)}  extension ${d.extension.toFixed(2)}\n` +
+          `MediaPipe label ${hd} (= your ${hd === "Left" ? "right" : "left"} hand)   ${state.fps.toFixed(0)} fps`;
+        if (state.recKey) {
+          state.samples.push({ t: Math.round(now), label: LABELS.find(([k]) => k === state.recKey)[1], hand: hd,
+            index: d.index, handdir: d.hand, palm: d.palm, straightness: d.straightness, extension: d.extension,
+            world: state.world.map(p => p.map(v => +v.toFixed(4))),
+            image: res.landmarks[0].map(p => [+p.x.toFixed(4), +p.y.toFixed(4)]) });
+          state.counts[state.recKey] = (state.counts[state.recKey] || 0) + 1;
+          $("c" + state.recKey).textContent = state.counts[state.recKey];
+        }
+        $("recinfo").textContent = `${state.samples.length} samples`;
+        LABELS.forEach(([k]) => $("r" + k).className = state.recKey === k ? "rec" : "");
+      } else { state.dirs = null; state.smoothed = null; state.world = null; $("angles").textContent = "no hand"; }
+      drawCam(video, res, res.landmarks.length ? 0 : null);
+    }
+    draw3D(); drawMap();
+    requestAnimationFrame(loop);
+  };
+  loop();
+} catch (e) { $("err").textContent = "Camera / model failed: " + e.message; console.error(e); }
+</script>
+</body>
+</html>

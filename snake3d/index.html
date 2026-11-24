@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LiDAR Snake 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1014; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
+  canvas#cv { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; top: 10px; left: 14px; pointer-events: none; }
+  #hud h1 { font-size: 18px; margin: 0 0 6px; color: #fff; }
+  #hud .stat span { margin-right: 14px; } #hud b { color: #fff; }
+  #modes { position: fixed; top: 10px; right: 14px; display: flex; gap: 6px; }
+  #modes button { background: #262a33; color: #ccc; border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 14px; }
+  #modes button.on { background: #2fbf71; color: #08140d; font-weight: bold; }
+  #modebox { position: fixed; top: 50px; right: 14px; width: 300px; background: rgba(20,22,27,.85); border-radius: 8px;
+             padding: 10px; font-size: 12px; color: #aaa; }
+  #modebox input[type=text] { width: 190px; background: #0e1014; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 3px; }
+  #modebox button { background: #2a2e38; color: #ddd; border: 0; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  #modebox .mono { font-family: ui-monospace, Consolas, monospace; white-space: pre; color: #ccc; }
+  #cam { position: fixed; right: 14px; bottom: 14px; width: 300px; display: none; }
+  #cam canvas { width: 300px; border-radius: 6px; border: 2px solid #333; display: block; }
+  #cam video { display: none; }
+  #help { position: fixed; bottom: 10px; left: 14px; right: 330px; color: #8a8f99; font-size: 12px; pointer-events: none; }
+  #banner { position: fixed; left: 0; right: 0; top: 40%; text-align: center; background: rgba(10,12,16,.72);
+            padding: 14px 0; display: none; pointer-events: none; }
+  #banner .t { font-size: 24px; font-weight: bold; color: #fff; } #banner .s { color: #bbb; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud"><h1>LiDAR Snake 3D</h1>
+  <div class="stat"><span>Score <b id="score">0</b></span><span>Objects left <b id="left">-</b></span>
+    <span>Speed <b id="speed">-</b> m/s</span><span>Heading <b id="heading">-</b></span></div></div>
+<div id="modes"><button data-m="camera">Camera</button><button data-m="audio">Audio</button><button data-m="keyboard">Keyboard</button></div>
+<div id="modebox"></div>
+<div id="cam"><canvas id="camcv" width="640" height="480"></canvas><video id="camvid" playsinline></video></div>
+<div id="banner"><div class="t" id="bt"></div><div class="s" id="bs"></div></div>
+<div id="help">The view is fixed: right = right, "into the screen" = forward, up = up. Food = the glowing objects; touch one to eat
+  the whole object (+5) and grow; cyan pellets are small snacks (+1) that respawn: any height counts, just get your shadow into the cyan ring. Walls stop you, you slide along them. Space pause · R restart · <code>?level=dir/</code> <code>?mode=camera|audio|keyboard</code></div>
+
+<script type="module">
+import { Level, createWorld, addSnake, setTarget, setSpeed, setSpeedLevel, step, bodyPoints, unit } from "./snake3d.js";
+
+const Q = new URLSearchParams(location.search);
+const LEVEL_DIR = (Q.get("level") || "levels/hall_0807/").replace(/([^/])$/, "$1/");
+const $ = id => document.getElementById(id);
+const cv = $("cv"), gl = cv.getContext("webgl2", { antialias: true });
+const ME = "p1";   // the local player's snake id; multiplayer will add more snakes to the same world
+
+// ---------------- tiny mat4 ----------------
+const M4 = {
+  mul(a, b) { const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+    return o; },
+  persp(fov, asp, n, f) { const t = 1 / Math.tan(fov / 2), o = new Float32Array(16);
+    o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f); return o; },
+  lookAt(e, c, u) {
+    const sub = (a, b) => a.map((v, i) => v - b[i]), nrm = a => { const l = Math.hypot(...a); return a.map(v => v / l); };
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const z = nrm(sub(e, c)), x = nrm(cross(u, z)), y = cross(z, x);
+    return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, e), -dot(y, e), -dot(z, e), 1]); },
+  model(t, s, ry = 0) { const c = Math.cos(ry), n = Math.sin(ry);
+    return new Float32Array([c * s[0], 0, -n * s[0], 0, 0, s[1], 0, 0, n * s[2], 0, c * s[2], 0, t[0], t[1], t[2], 1]); },
+};
+// game frame (x right, y forward, z up) -> GL (x right, y up, z towards the viewer)
+const G = p => [p[0], p[2], -p[1]];
+
+function prog(vs, fs, attribs) {
+  const p = gl.createProgram();
+  for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  attribs.forEach((a, i) => gl.bindAttribLocation(p, i, a));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const nm = gl.getActiveUniform(p, i).name.replace("[0]", ""); u[nm] = gl.getUniformLocation(p, nm); }
+  return { p, u };
+}
+const PTS = prog(`#version 300 es
+in vec3 aPos; in float aLab;
+uniform mat4 uVP; uniform float uTime, uPt, uVH; uniform float uEat[64]; uniform vec3 uCtr[64];
+out vec3 vCol;
+void main() {
+  int L = int(aLab + 0.5);
+  vec3 p = vec3(aPos.x, aPos.z, -aPos.y);
+  float size = uPt, h = aPos.z;
+  if (L == 0) vCol = h < 0.06 ? vec3(0.20, 0.23, 0.28) : mix(vec3(0.28, 0.42, 0.58), vec3(0.78, 0.84, 0.92), clamp(h / 2.5, 0., 1.));
+  else {
+    float pulse = 0.5 + 0.5 * sin(uTime * 4.0 + float(L));
+    vCol = mix(vec3(1.0, 0.55, 0.05), vec3(1.0, 0.88, 0.35), pulse);
+    float e = uEat[L];
+    if (e >= 0.0) { float k = clamp((uTime - e) / 0.6, 0., 1.);
+      p = mix(p, uCtr[L] + vec3(0., 1.2 * k, 0.), k * k * (3. - 2. * k)); vCol = mix(vCol, vec3(0.45, 1.0, 0.65), k); size *= 1.0 - k; }
+  }
+  gl_Position = size > 0.0 ? uVP * vec4(p, 1.) : vec4(2., 2., 2., 1.);
+  gl_PointSize = clamp(size * uVH / gl_Position.w, 1.0, 10.0);
+}`, `#version 300 es
+precision mediump float; in vec3 vCol; out vec4 o;
+void main() { vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; o = vec4(vCol, 1.); }`, ["aPos", "aLab"]);
+const MESH = prog(`#version 300 es
+in vec3 aPos; in vec3 aNrm; uniform mat4 uVP, uM; out vec3 vN;
+void main() { vN = mat3(uM) * aNrm; gl_Position = uVP * uM * vec4(aPos, 1.); }`, `#version 300 es
+precision mediump float; in vec3 vN; uniform vec4 uCol; uniform float uLit; out vec4 o;
+void main() { float l = 1.0; if (uLit > 0.5) l = 0.4 + 0.6 * max(dot(normalize(vN), normalize(vec3(0.4, 1.0, 0.5))), 0.);
+  o = vec4(uCol.rgb * l, uCol.a); }`, ["aPos", "aNrm"]);
+
+function vao(attribs, index) {
+  const v = gl.createVertexArray(); gl.bindVertexArray(v);
+  for (const [loc, data, size] of attribs) {
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  }
+  gl.bindVertexArray(null); return v;
+}
+const SPHERE = (() => {   // UV sphere, radius 1, as triangles
+  const P = [], N = [], S = 16, R = 10;
+  const pt = (i, j) => { const th = j / R * Math.PI, ph = i / S * 2 * Math.PI; return [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)]; };
+  for (let j = 0; j < R; j++) for (let i = 0; i < S; i++) {
+    const a = pt(i, j), b = pt(i + 1, j), c = pt(i + 1, j + 1), d = pt(i, j + 1);
+    for (const q of [a, c, b, a, d, c]) { P.push(...q); N.push(...q); }
+  }
+  return { vao: vao([[0, new Float32Array(P), 3], [1, new Float32Array(N), 3]]), n: P.length / 3 };
+})();
+const CUBE = (() => {
+  const P = [], N = [];
+  for (const [ax, sg] of [[0, 1], [0, -1], [1, 1], [1, -1], [2, 1], [2, -1]]) {
+    const u = (ax + 1) % 3, w = (ax + 2) % 3, q = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+    for (const [a, b] of (sg > 0 ? q : q.map(([a, b]) => [b, a]))) {
+      const p = [0, 0, 0]; p[ax] = sg * .5; p[u] = a * .5; p[w] = b * .5; P.push(...p);
+      const nn = [0, 0, 0]; nn[ax] = sg; N.push(...nn);
+    }
+  }
+  return { vao: vao([[0, new Float32Array(P), 3], [1, new Float32Array(N), 3]]), n: 36 };
+})();
+
+// ---------------- level + world ----------------
+let level, world, ptsVao, nPts, eatTime = new Float32Array(64).fill(-1), ctr = new Float32Array(64 * 3), objTop = [];
+let paused = false, lastT = performance.now(), mode = null, pops = [];
+async function load() {
+  const meta = await (await fetch(LEVEL_DIR + "level3d.json")).json();
+  const vox = new Uint8Array(await (await fetch(LEVEL_DIR + "voxels.bin")).arrayBuffer());
+  const buf = await (await fetch(LEVEL_DIR + meta.points.file)).arrayBuffer();
+  level = new Level(meta, vox);
+  nPts = meta.points.n;
+  const xyz = new Float32Array(buf, 0, nPts * 3), lab = new Uint8Array(buf, nPts * 12, nPts);
+  ptsVao = vao([[0, xyz, 3], [1, Float32Array.from(lab), 1]]);
+  for (const o of meta.objects) { const c = G(o.center); ctr.set(c, o.id * 3); objTop[o.id] = o.top_m; }
+  restart();
+}
+function restart() {
+  world = createWorld(level, { pellets: +(Q.get("pellets") ?? 25), seed: (Date.now() & 0xffff) || 1 });
+  addSnake(world, ME, { dir: [0, 1, 0] });
+  if (mode === "camera") setSpeed(world, ME, +($("cspeed")?.value || 0.7));
+  eatTime.fill(-1); paused = false;
+}
+window.game = { get world() { return world; } };   // for debugging / automated tests
+
+// ---------------- input modes ----------------
+// All modes end in setTarget(world, ME, gameVector) and, for audio, setSpeed / setSpeedLevel.
+// Player frame of the hand tracker: x right, y up, z towards the screen -> game: x right, y forward, z up.
+const playerToGame = v => [v[0], v[2], v[1]];
+let cam = null, keysDown = new Set(), ws = null, lastAudio = "-";
+
+const modeUI = {
+  camera: `<b>Camera mode</b>: point with your index finger. Point at the screen to fly into the scene, up to rise.
+    The snake keeps its heading while no finger is seen.<br>
+    speed <input type="range" id="cspeed" min="0.2" max="1.6" step="0.1" value="0.7"> <span id="vcspeed">0.7</span> m/s<br>
+    depth bias <input type="range" id="cbias" min="-0.4" max="0.6" step="0.05" value="${Q.get("bias") || 0}"> <span id="vcbias">${Q.get("bias") || 0}</span>
+    <span title="A single camera tends to read a finger as pointing a bit towards the screen. If the snake drifts forward while you point sideways, raise this.">(?)</span>
+    <div class="mono" id="camstat">starting camera...</div>`,
+  audio: `<b>Audio mode</b>: direction and speed come from the mic-array program (see AUDIO_API.md).<br>
+    <input type="text" id="wsurl" value="${Q.get("audio") || "ws://localhost:8765"}"> <button id="wsgo">connect</button>
+    <div class="mono" id="audstat">not connected</div>`,
+  keyboard: `<b>Keyboard mode</b> (for testing): arrows / WASD = forward, back, left, right; E / Q = up, down.
+    Hold several for diagonals. + / - change speed.`,
+};
+
+async function setMode(m) {
+  if (mode === m) return;
+  if (cam) { cam.stop(); cam = null; $("cam").style.display = "none"; }
+  if (ws) { ws.close(); ws = null; }
+  mode = m;
+  document.querySelectorAll("#modes button").forEach(b => b.className = b.dataset.m === m ? "on" : "");
+  $("modebox").innerHTML = modeUI[m];
+  if (m === "camera") {
+    $("cspeed").oninput = () => { $("vcspeed").textContent = $("cspeed").value; setSpeed(world, ME, +$("cspeed").value); };
+    $("cbias").oninput = () => { $("vcbias").textContent = $("cbias").value; };
+    setSpeed(world, ME, 0.7);
+    startCamera();
+  } else if (m === "audio") {
+    $("wsgo").onclick = () => connectAudio($("wsurl").value);
+    if (Q.get("audio")) connectAudio(Q.get("audio"));
+  }
+}
+document.querySelectorAll("#modes button").forEach(b => b.onclick = () => setMode(b.dataset.m));
+
+async function startCamera() {
+  $("cam").style.display = "block";
+  try {
+    const [{ createHandLandmarker, openCamera, BONES }, { handDirections, OneEuro3 }] =
+      await Promise.all([import("./hand_tracker.js"), import("./hand_direction.js")]);
+    const hands = await createHandLandmarker(1);
+    const video = $("camvid"), { stream, label } = await openCamera({ cameraLabel: Q.get("camera") || undefined });
+    video.srcObject = stream; video.muted = true; await video.play();
+    const filt = new OneEuro3(1.5, 0.05), ccv = $("camcv"), g = ccv.getContext("2d");
+    let running = true, lastVT = -1;
+    cam = { stop() { running = false; stream.getTracks().forEach(t => t.stop()); hands.close(); } };
+    const loop = () => {
+      if (!running) return;
+      if (video.readyState >= 2 && video.currentTime !== lastVT) {
+        lastVT = video.currentTime;
+        const now = performance.now(), res = hands.detectForVideo(video, now);
+        g.save(); g.translate(ccv.width, 0); g.scale(-1, 1); g.drawImage(video, 0, 0, ccv.width, ccv.height);
+        let txt = `${label}\nno hand`;
+        if (res.worldLandmarks.length) {
+          const lm = res.landmarks[0];
+          g.strokeStyle = "#7dffb0"; g.lineWidth = 3;
+          for (const [a, b] of BONES) { g.beginPath(); g.moveTo(lm[a].x * ccv.width, lm[a].y * ccv.height); g.lineTo(lm[b].x * ccv.width, lm[b].y * ccv.height); g.stroke(); }
+          const d = handDirections(res.worldLandmarks[0], res.handedness[0]?.[0]?.categoryName);
+          if (d.extension > 1.25) {               // index finger extended: steer
+            const v = filt.filter(d.index, now), bias = +($("cbias")?.value || 0);
+            const gv = playerToGame([v[0], v[1], v[2] - bias]);      // remove the towards-screen bias
+            if (world && !paused) setTarget(world, ME, gv);
+            txt = `${label}\nfinger  right ${v[0].toFixed(2)}  up ${v[1].toFixed(2)}  screen ${v[2].toFixed(2)}`;
+          } else txt = `${label}\nhand seen, index finger not extended`;
+        }
+        g.restore();
+        if ($("camstat")) $("camstat").textContent = txt;
+      }
+      requestAnimationFrame(loop);
+    };
+    loop();
+  } catch (e) { if ($("camstat")) $("camstat").textContent = "camera failed: " + e.message; console.error(e); }
+}
+
+// Audio input, see AUDIO_API.md. Also callable from the page: window.audioInput({...}).
+function audioInput(msg) {
+  if (typeof msg === "string") msg = JSON.parse(msg);
+  let v = null;
+  if (Array.isArray(msg.dir)) v = msg.dir;
+  else if (Number.isFinite(msg.azimuth_cw_deg)) {   // Hear-then-Locate convention: 0 = front, clockwise seen from above
+    const az = msg.azimuth_cw_deg * Math.PI / 180, el = (msg.elevation_deg || 0) * Math.PI / 180;
+    v = [Math.cos(el) * Math.sin(az), Math.cos(el) * Math.cos(az), Math.sin(el)];
+  }
+  else if (Number.isFinite(msg.azimuth_deg)) {
+    const az = msg.azimuth_deg * Math.PI / 180, el = (msg.elevation_deg || 0) * Math.PI / 180;
+    v = [Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)];   // 0 deg = right, 90 = forward
+  }
+  if (v && world) setTarget(world, ME, v);
+  if (Number.isFinite(msg.speed)) setSpeed(world, ME, msg.speed);
+  else if (Number.isFinite(msg.level)) setSpeedLevel(world, ME, msg.level);
+  lastAudio = JSON.stringify(msg);
+  if ($("audstat")) $("audstat").textContent = `${ws && ws.readyState === 1 ? "connected" : "local"}\nlast: ${lastAudio.slice(0, 80)}`;
+}
+window.audioInput = audioInput;
+function connectAudio(url) {
+  if (ws) ws.close();
+  ws = new WebSocket(url);
+  ws.onopen = () => { if ($("audstat")) $("audstat").textContent = "connected to " + url; };
+  ws.onmessage = e => { try { audioInput(e.data); } catch (err) { console.warn("bad audio message", e.data); } };
+  ws.onclose = () => { if ($("audstat")) $("audstat").textContent = "disconnected"; };
+  ws.onerror = () => { if ($("audstat")) $("audstat").textContent = "cannot connect to " + url; };
+}
+
+const KEYVEC = { ArrowUp: [0, 1, 0], w: [0, 1, 0], ArrowDown: [0, -1, 0], s: [0, -1, 0], ArrowLeft: [-1, 0, 0], a: [-1, 0, 0],
+                 ArrowRight: [1, 0, 0], d: [1, 0, 0], e: [0, 0, 1], q: [0, 0, -1] };
+function keyTarget() {
+  if (mode !== "keyboard" || !world) return;
+  let v = [0, 0, 0];
+  for (const k of keysDown) { const kv = KEYVEC[k]; if (kv) v = v.map((x, i) => x + kv[i]); }
+  if (Math.hypot(...v) > 0) setTarget(world, ME, v);
+}
+addEventListener("keydown", e => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === "r") restart();
+  else if (k === " ") { paused = !paused; e.preventDefault(); }
+  else if (mode === "keyboard" && (k === "+" || k === "=")) setSpeed(world, ME, world.snakes.get(ME).speed + 0.1);
+  else if (mode === "keyboard" && k === "-") setSpeed(world, ME, world.snakes.get(ME).speed - 0.1);
+  else if (KEYVEC[k]) { keysDown.add(k); keyTarget(); e.preventDefault(); }
+});
+addEventListener("keyup", e => { keysDown.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key); });
+
+// ---------------- loop + draw ----------------
+function frame(now) {
+  let dt = Math.min(0.25, (now - lastT) / 1000); lastT = now;   // real time, even at a low frame rate
+  if (world && !paused) {
+    while (dt > 1e-6) { const h = Math.min(0.02, dt); step(world, h); dt -= h; }
+    for (const ev of world.events.splice(0)) {
+      if (ev.type === "eat") eatTime[ev.object] = now / 1000;
+      if (ev.type === "pellet") pops.push({ pos: ev.pos, t: now / 1000 });
+    }
+  }
+  if (world) draw(now / 1000);
+  requestAnimationFrame(frame);
+}
+
+function draw(time) {
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth * dpr, h = cv.clientHeight * dpr;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0.055, 0.063, 0.08, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  const A = level.meta.arena, span = Math.max(A.half_x, A.half_y) * 2;
+  // fixed camera from the near side, framed so the whole arena (and its near edge) is on screen
+  const pitch = 0.98, fov = 0.85, dist = span * 1.12 / Math.min(1, (w / h) / 1.3);
+  const look = [0, 0.4, span * 0.1];
+  const VP = M4.mul(M4.persp(fov, w / h, 0.1, 200),
+                    M4.lookAt([look[0], look[1] + dist * Math.sin(pitch), look[2] + dist * Math.cos(pitch)], look, [0, 1, 0]));
+
+  gl.useProgram(PTS.p);
+  gl.uniformMatrix4fv(PTS.u.uVP, false, VP);
+  gl.uniform1f(PTS.u.uTime, time); gl.uniform1f(PTS.u.uPt, 0.035); gl.uniform1f(PTS.u.uVH, h * 1.2);
+  gl.uniform1fv(PTS.u.uEat, eatTime); gl.uniform3fv(PTS.u.uCtr, ctr);
+  gl.bindVertexArray(ptsVao); gl.drawArrays(gl.POINTS, 0, nPts);
+
+  gl.useProgram(MESH.p); gl.uniformMatrix4fv(MESH.u.uVP, false, VP);
+  const draw1 = (mesh, t, s, col, lit = 1, ry = 0) => {
+    gl.bindVertexArray(mesh.vao);
+    gl.uniformMatrix4fv(MESH.u.uM, false, M4.model(t, s, ry)); gl.uniform4fv(MESH.u.uCol, col); gl.uniform1f(MESH.u.uLit, lit);
+    gl.drawArrays(gl.TRIANGLES, 0, mesh.n);
+  };
+  const s = world.snakes.get(ME), r = world.opts.radius;
+  const body = bodyPoints(s, r * 1.1), dead = !s.alive;
+  body.forEach((p, i) => {
+    const f = i / Math.max(body.length, 2), rr = i ? r : r * 1.35;
+    const col = dead ? [0.85, 0.25, 0.25, 1] : i ? [0.2, 0.78 - 0.35 * f, 0.45, 1] : s.blocked ? [1, 0.6, 0.2, 1] : [0.55, 1, 0.72, 1];
+    draw1(SPHERE, G(p), [rr, rr, rr], col);
+  });
+  for (const o of level.objects) {   // spinning marker above each uneaten object
+    if (world.eaten.has(o.id - 1)) continue;
+    const c = o.center, y = o.top_m + 0.35 + 0.06 * Math.sin(time * 3 + o.id);
+    draw1(CUBE, G([c[0], c[1], y]), [0.16, 0.16, 0.16], o.reachable === false ? [0.6, 0.6, 0.6, 1] : [1, 0.78, 0.1, 1], 1, time * 1.5 + o.id);
+  }
+  const pr = world.opts.pelletRadius;
+  for (const p of world.pellets) {   // random pellets: glowing, bobbing
+    const b = 0.03 * Math.sin(time * 2.5 + p.id);
+    draw1(SPHERE, G([p.pos[0], p.pos[1], p.pos[2] + b]), [pr, pr, pr], [0.3, 0.95, 1.0, 1], 0);
+  }
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+  for (const p of world.pellets) {   // halo + floor shadow, so the height can be judged
+    draw1(SPHERE, G(p.pos), [pr * 1.8, pr * 1.8, pr * 1.8], [0.3, 0.95, 1.0, 0.18 + 0.08 * Math.sin(time * 4 + p.id)], 0);
+    const hr = world.opts.pelletHitXY;   // the edible zone on the floor: get your shadow into the ring
+    draw1(SPHERE, G([p.pos[0], p.pos[1], 0.012]), [hr, 0.002, hr], [0.3, 0.95, 1.0, 0.16 + 0.06 * Math.sin(time * 3 + p.id)], 0);
+    draw1(CUBE, G([p.pos[0], p.pos[1], p.pos[2] / 2]), [0.012, p.pos[2], 0.012], [0.3, 0.95, 1.0, 0.35], 0);
+  }
+  pops = pops.filter(q => time - q.t < 0.4);
+  for (const q of pops) { const k = (time - q.t) / 0.4, rr = pr * (1 + 4 * k);
+    draw1(SPHERE, G(q.pos), [rr, rr, rr], [0.6, 1, 1, 0.5 * (1 - k)], 0); }
+  const hd = s.head;
+  draw1(CUBE, G([hd[0], hd[1], hd[2] / 2]), [0.02, hd[2], 0.02], [0.55, 1, 0.72, 0.8], 0);   // stalk to the floor
+  body.forEach((p, i) => { const rr = (i ? r : r * 1.35) * 1.1; draw1(SPHERE, G([p[0], p[1], 0.01]), [rr, 0.002, rr], [0, 0, 0, 0.45], 0); });
+  if (s.started || mode) {   // target direction: a thin arrow from the head
+    for (let k = 1; k <= 6; k++) { const q = [hd[0] + s.target[0] * k * 0.1, hd[1] + s.target[1] * k * 0.1, hd[2] + s.target[2] * k * 0.1];
+      draw1(SPHERE, G(q), [0.025, 0.025, 0.025], [1, 0.85, 0.2, 0.25 + 0.1 * k], 0); }
+  }
+  gl.depthMask(true); gl.disable(gl.BLEND);
+
+  $("score").textContent = s.score; $("left").textContent = world.foodLeft; $("speed").textContent = s.speed.toFixed(2);
+  const yaw = Math.atan2(s.dir[0], s.dir[1]) * 180 / Math.PI, pit = Math.asin(Math.max(-1, Math.min(1, s.dir[2]))) * 180 / Math.PI;
+  $("heading").textContent = `${yaw.toFixed(0)}° / ${pit.toFixed(0)}°`;
+  if (world.won) banner("All objects eaten!", `Score ${s.score} · R to play again`);
+  else if (dead) banner("You hit yourself", `Score ${s.score} · R to restart`);
+  else if (paused) banner("Paused", "Space to resume");
+  else if (!s.started) banner(mode === "camera" ? "Point with your index finger to start" : mode === "audio" ? "Waiting for the audio direction"
+                              : "Press an arrow key to start", "glowing objects are food; touch one to eat it");
+  else banner(null);
+}
+function banner(t, sub) {
+  $("banner").style.display = t ? "block" : "none";
+  if (t) { $("bt").textContent = t; $("bs").textContent = sub; }
+}
+
+if (!gl) document.body.innerHTML = "<p style='padding:40px'>This browser has no WebGL2.</p>";
+else load().then(() => setMode(Q.get("mode") || "camera")).catch(err => {
+  document.body.insertAdjacentHTML("beforeend", `<p style="position:fixed;top:45%;width:100%;text-align:center">
+    Couldn't load ${LEVEL_DIR} (${err.message}). Serve the folder: <code>python3 -m http.server 8000</code></p>`);
+  console.error(err);
+});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
