@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>声控贪吃蛇</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/snake.js" type="module"></script>
+</head>
+<body>
+  <main class="console">
+    <header class="masthead">
+      <h1>声控贪吃蛇</h1>
+      <a class="mode" href="/">定位与校准</a>
+    </header>
+    <div class="dashboard">
+      <section class="stage" aria-label="三维蛇棋盘">
+        <canvas id="snake-board" aria-label="固定视角的三维贪吃蛇棋盘"></canvas>
+      </section>
+      <aside>
+        <p id="game-mode" class="status">连接中</p>
+        <button id="game-start">开始</button>
+        <section class="signal" aria-label="比赛状态">
+          <p id="game-status" class="status" aria-live="polite">最多四人</p>
+          <p class="stats">速度 <b id="game-speed">1×</b> · 得分 <b id="game-score">0</b></p>
+          <p id="game-direction" class="stats">方向 —</p>
+          <p id="game-timer" class="help"></p>
+          <ol id="game-ranks" class="rank-list"></ol>
+        </section>
+        <section id="mock-input" class="signal" hidden>
+          <p class="help">模拟拍手</p>
+          <div id="mock-players" class="mock-players"></div>
+          <button id="mock-all">四人同时拍手</button>
+        </section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

@@ -59,6 +59,24 @@ h1 { margin: 0; font-size: 24px; font-weight: 600; }
 
 #sphere:active { cursor: grabbing; }
 
+#snake-board {
+    display: block;
+    width: 100%;
+    height: clamp(320px, 65vh, 580px);
+}
+
+.rank-list { padding-left: 19px; font-size: 13px; }
+.rank-list li + li { margin-top: 4px; }
+.mock-player {
+    display: grid;
+    grid-template-columns: auto minmax(44px, 1fr) auto;
+    align-items: center;
+    gap: 5px;
+    margin: 8px 0;
+    font-size: 12px;
+}
+.mock-player input { width: 100%; accent-color: #333; }
+
 aside {
     border-left: 1px solid #ddd;
     padding-left: 20px;

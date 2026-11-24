@@ -1,16 +1,19 @@
 """Local browser interface for the dual XVF3800 array."""
 import argparse
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 import numpy as np
 
-from localize import Localizer
+from localize import Localizer, RATE
 from sound_events import ClapMonitor, Yamnet, pcm_levels
+from spatial_claps import SpatialClaps
 from stream import prepare_esp, receive
 from tracking import DirectionTracker, SoundActivity
 
@@ -34,6 +37,10 @@ class Engine:
         self.clap_until = 0.
         self.clap_direction = None
         self.last_audio = 0.
+        self.game_until = 0.
+        self.game_cursor = 0
+        self.game_events = deque(maxlen=48)
+        self.spatial_claps = None
         if mode == "live":
             try:
                 self.monitor = ClapMonitor(Yamnet(ROOT / "yamnet.tflite"))
@@ -75,6 +82,31 @@ class Engine:
             return False
         self.update(**{field: value})
         return True
+
+    def game_input(self, after):
+        with self.lock:
+            now = time.monotonic()
+            self.game_until = now + 2.
+            return {
+                "cursor": self.game_cursor,
+                "mode": self.mode,
+                "ready": bool(self.monitor and all(self.state["boards"]) and not self.deadline),
+                "calibrated": self.offset is not None,
+                "events": [event for event in self.game_events
+                           if after is not None and event["id"] > after and now - event["received"] < 2.]
+            }
+
+    def publish_clap(self, impulse, phase, offset, sample, now):
+        if self.spatial_claps is None:
+            self.spatial_claps = SpatialClaps(self.model.positions)
+        groups = self.spatial_claps.estimate(impulse, phase, offset, self.noise_spectrum)
+        if groups:
+            with self.lock:
+                self.game_cursor += 1
+                self.game_events.append({
+                    "id": self.game_cursor, "at": sample / RATE, "received": now,
+                    "groups": groups,
+                })
 
     def start_reference(self):
         with self.lock:
@@ -149,8 +181,14 @@ class Engine:
                     self.votes.append(vote)
             offset = self.offset
             tracker = self.tracker
+            play = now <= self.game_until and not self.deadline
         if self.monitor is not None:
-            for kind, impulse, rise in self.monitor.process(audio, origin, sensitivity):
+            # The game may hear a second participant during the display detector's cooldown.
+            events = self.monitor.process(audio, origin, sensitivity, collect_game=play)
+            for kind, impulse, rise, sample in events:
+                if kind == "game":
+                    self.publish_clap(impulse, phase, offset, sample, now)
+                    continue
                 event_corr = self.model.correlations(impulse, self.noise_spectrum)
                 estimate = (self.model.direction(event_corr, phase, offset)
                             if event_corr is not None else None)
@@ -217,6 +255,9 @@ def handler_for(engine):
     class Handler(BaseHTTPRequestHandler):
         files = {
             "/": ("index.html", "text/html; charset=utf-8"),
+            "/snake": ("snake.html", "text/html; charset=utf-8"),
+            "/snake.js": ("snake.js", "application/javascript; charset=utf-8"),
+            "/game_rules.mjs": ("game_rules.mjs", "application/javascript; charset=utf-8"),
             "/style.css": ("style.css", "text/css; charset=utf-8"),
             "/sphere.js": ("sphere.js", "application/javascript; charset=utf-8"),
             "/ui.js": ("ui.js", "application/javascript; charset=utf-8"),
@@ -237,9 +278,18 @@ def handler_for(engine):
             self.send_content(json.dumps(value).encode(), "application/json", code)
 
         def do_GET(self):
-            path = self.path.partition("?")[0]
+            url = urlsplit(self.path)
+            path = url.path
             if path == "/api/state":
                 self.send_json(engine.snapshot())
+            elif path == "/api/claps":
+                value = parse_qs(url.query).get("after", [None])[0]
+                try:
+                    after = None if value is None else int(value)
+                except ValueError:
+                    self.send_json({"error": "invalid event cursor"}, 400)
+                    return
+                self.send_json(engine.game_input(after))
             elif path in self.files:
                 file, media = self.files[path]
                 self.send_content((ROOT / file).read_bytes(), media)
@@ -282,6 +332,7 @@ def main():
     parser.add_argument("--port", type=int, default=0, help="localhost HTTP port; default finds a free port")
     parser.add_argument("--array", type=Path, default=ROOT / "array.json", help="microphone geometry file")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--game", action="store_true", help="open the Snake page directly")
     args = parser.parse_args()
     if (args.host or args.serial) and not args.live:
         parser.error("--host and --serial require --live")
@@ -294,7 +345,7 @@ def main():
         if args.live:
             worker = threading.Thread(target=engine.start_live, args=(args,), daemon=True)
             worker.start()
-        url = f"http://127.0.0.1:{server.server_port}/"
+        url = f"http://127.0.0.1:{server.server_port}/" + ("snake" if args.game else "")
         print(f"Open {url}   |   Ctrl+C to stop", flush=True)
         if not args.no_browser:
             webbrowser.open(url)

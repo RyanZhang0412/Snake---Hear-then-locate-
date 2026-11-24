@@ -71,6 +71,7 @@ class ClapMonitor:
         self.pending = []
         self.last_clap = None
         self.last_preview = None
+        self.last_game_clap = None
         self.examined = None
 
     def _append(self, audio, start):
@@ -146,7 +147,7 @@ class ClapMonitor:
         left = max(0, onset - 144)
         return audio[left:left + 512]
 
-    def process(self, audio, start, sensitivity):
+    def process(self, audio, start, sensitivity, *, collect_game=False):
         self._append(audio, start)
         events = []
         for onset, rise in self.candidate_blocks(audio, sensitivity):
@@ -164,12 +165,15 @@ class ClapMonitor:
                                           or candidate - self.last_preview >= REFRACTORY):
                 index = candidate - self.start
                 self.last_preview = candidate
-                events.append(("transient", self.direct_arrival(self.audio, index), rise))
+                events.append(("transient", self.direct_arrival(self.audio, index), rise, candidate))
 
         while self.pending and self.pending[0][0] + MODEL_TAIL <= self.start + len(self.audio):
             candidate, rise = self.pending.pop(0)
             self.examined = candidate
-            if self.last_clap is not None and candidate - self.last_clap < REFRACTORY:
+            display = self.last_clap is None or candidate - self.last_clap >= REFRACTORY
+            game = collect_game and (self.last_game_clap is None or
+                                     candidate - self.last_game_clap >= int(.075 * RATE))
+            if not display and not game:
                 continue
             index = candidate - self.start
             # The short direct arrival is more useful for direction than the full classifier context.
@@ -185,7 +189,17 @@ class ClapMonitor:
                                              sensitivity):
                 kind = "possible"
             else:
+                kind = None
+            # Single claps can fall below a whole-scene classifier's threshold.
+            # High mode can send a strong, unvetoed impulse to the spatial validator.
+            accept_game = game and (kind is not None or sensitivity == "high" and rise >= 9.)
+            if kind is None and not accept_game:
                 continue
-            self.last_clap = candidate
-            events.append((kind, self.direct_arrival(self.audio, index), rise))
+            arrival = self.direct_arrival(self.audio, index)
+            if display and kind is not None:
+                self.last_clap = candidate
+                events.append((kind, arrival, rise, candidate))
+            if accept_game:
+                self.last_game_clap = candidate
+                events.append(("game", arrival, rise, candidate))
         return events
