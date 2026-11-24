@@ -131,12 +131,17 @@
   <text class="mO" x="600" y="664">+ clap events: onset detection + YAMNet</text>
 
   <!-- keyboard / multiplayer -->
+  <rect x="46" y="700" width="118" height="62" rx="8" fill="#7a7f8c"/>
+  <text class="tag" x="105" y="736">Keyboard</text>
   <rect class="boxS" x="184" y="700" width="832" height="62" rx="8"/>
-  <text class="t" x="420" y="737" style="font-size:16px">Keyboard</text>
-  <text class="s" x="700" y="737" style="text-anchor:middle">arrows / WASD + E / Q (debugging)</text>
-  <rect class="boxD" x="184" y="784" width="832" height="62" rx="8"/>
-  <text class="t" x="420" y="821" style="font-size:16px; fill:#7a7f8c">Multiplayer</text>
-  <text class="s" x="700" y="821" style="text-anchor:middle; fill:#7a7f8c">planned: one (d, v) per player</text>
+  <text class="s" x="600" y="737" style="text-anchor:middle; font-size:15px">arrows / WASD + E / Q  →  d,   + / −  →  v   (debugging)</text>
+
+  <rect x="46" y="784" width="118" height="62" rx="8" fill="#5b6475"/>
+  <text class="tag" x="105" y="820" style="font-size:14px">Multiplayer</text>
+  <rect class="boxD" x="184" y="784" width="832" height="62" rx="8" style="fill:#fbfbfc"/>
+  <rect x="204" y="800" width="196" height="30" rx="15" fill="#f2b632"/>
+  <text x="302" y="821" style="font-size:13.5px; font-weight:700; fill:#3a2a00; text-anchor:middle; letter-spacing:0.5px">UNDER CONSTRUCTION</text>
+  <text class="s" x="700" y="821" style="text-anchor:middle; font-size:15px">N players in one shared world, one (dᵢ, vᵢ) per snake</text>
 
   <!-- (c) game engine -->
   <rect class="frame" x="1128" y="284" width="448" height="594" rx="10"/>
