@@ -353,59 +353,102 @@ static void capture_task(void *arg) {
     }
 }
 
+static bool compact_subscription;
+
+static void send_audio(const uint8_t *wire, size_t wire_bytes, uint32_t packet_epoch,
+                       uint64_t delivery_us, board_t *b) {
+    struct sockaddr_in address;
+    uint32_t epoch;
+    if (!subscription_snapshot(&address, &epoch) || epoch != packet_epoch) return;
+    // Limit the time spent retrying one datagram and discard stale backlog.
+    const int64_t deadline = esp_timer_get_time() + TX_RETRY_US;
+    unsigned attempts = 0;
+    while (1) {
+        if (!subscription_snapshot(NULL, &epoch) || epoch != packet_epoch) break;
+        const int64_t now = esp_timer_get_time();
+        if ((uint64_t)now - delivery_us >= TX_MAX_AGE_US) {
+            __atomic_fetch_add(&b->stale_drops, 1, __ATOMIC_RELAXED);
+            break;
+        }
+        int sent = sendto(udp_sock, wire, wire_bytes, 0,
+                          (struct sockaddr *)&address, sizeof(address));
+        if (sent == (int)wire_bytes) break;
+        int error = sent < 0 ? errno : EIO;
+        if (attempts++ == 0) {
+            __atomic_fetch_add(&b->send_errors, 1, __ATOMIC_RELAXED);
+            __atomic_store_n(&b->last_send_errno, error, __ATOMIC_RELAXED);
+        }
+        bool retryable = error == ENOMEM || error == ENOBUFS || error == EAGAIN;
+        if (!retryable || now >= deadline || attempts >= 3) {
+            __atomic_fetch_add(&b->send_drops, 1, __ATOMIC_RELAXED);
+            break;
+        }
+        vTaskDelay(1);
+    }
+}
+
 static void sender_task(void *arg) {
     audio_packet_t packet;
     struct {
         packet_header_t header;
         uint8_t payload[sizeof(packet.words)];
     } encoded;
+    /* Three compact records fit below a standard MTU, with each board's
+     * original timestamps, sequence and overflow counters intact. */
+    static uint8_t bundle[1400] = {'X','1','6','B'};
+    size_t used = 4;
+    unsigned records = 0;
+    uint32_t bundle_epoch = 0;
+    uint64_t oldest = 0;
+    board_t *first_board = NULL;
     while (1) {
-        if (xQueueReceive(tx_queue, &packet, portMAX_DELAY) != pdPASS) continue;
+        if (xQueueReceive(tx_queue, &packet, records ? 1 : portMAX_DELAY) != pdPASS) {
+            if (records) send_audio(bundle, used, bundle_epoch, oldest, first_board);
+            used = 4;
+            records = 0;
+            continue;
+        }
         if (__atomic_exchange_n(&tx_hold_requested, 0, __ATOMIC_RELAXED)) {
             vTaskDelay(pdMS_TO_TICKS(250));
         }
-
-        struct sockaddr_in address;
         uint32_t epoch;
-        if (!subscription_snapshot(&address, &epoch) || epoch != packet.epoch) continue;
+        if (!subscription_snapshot(NULL, &epoch) || epoch != packet.epoch) continue;
+        if (records && bundle_epoch != epoch) { used = 4; records = 0; }
 
         board_t *b = &boards[packet.header.magic[3] == '2'];
         const size_t bytes = packet.header.payload_bytes;
-        const void *wire = &packet;
-        size_t wire_bytes = sizeof(packet_header_t) + bytes;
+        encoded.header = packet.header;
+        if (__atomic_load_n(&compact_subscription, __ATOMIC_RELAXED)) {
+            size_t size = xvf_encode_pcm16(packet.words, packet.header.frames, encoded.payload);
+            if (size) {
+                if (!records) {
+                    oldest = packet.header.delivery_time_us;
+                    first_board = b;
+                    bundle_epoch = epoch;
+                }
+                encoded.header.payload_bytes = size;
+                size_t record_bytes = sizeof(packet_header_t) + size;
+                memcpy(bundle + used, &encoded, record_bytes);
+                used += record_bytes;
+                if (++records == 3) {
+                    send_audio(bundle, used, epoch, oldest, first_board);
+                    used = 4;
+                    records = 0;
+                }
+                continue;
+            }
+            /* An invalid marker must remain visible to the host's format checks. */
+            if (records) send_audio(bundle, used, bundle_epoch, oldest, first_board);
+            used = 4;
+            records = 0;
+        }
         size_t packed = xvf_encode_words(packet.words, bytes / sizeof(packet.words[0]),
                                          encoded.payload, bytes);
         if (packed && packed < bytes) {
-            encoded.header = packet.header;
             encoded.header.payload_bytes = 0x8000 | packed;
-            wire = &encoded;
-            wire_bytes = sizeof(packet_header_t) + packed;
-        }
-
-        // Limit the time spent retrying one datagram and discard stale backlog.
-        const int64_t deadline = esp_timer_get_time() + TX_RETRY_US;
-        unsigned attempts = 0;
-        while (1) {
-            if (!subscription_snapshot(NULL, &epoch) || epoch != packet.epoch) break;
-            const int64_t now = esp_timer_get_time();
-            if ((uint64_t)now - packet.header.delivery_time_us >= TX_MAX_AGE_US) {
-                __atomic_fetch_add(&b->stale_drops, 1, __ATOMIC_RELAXED);
-                break;
-            }
-            int sent = sendto(udp_sock, wire, wire_bytes, 0,
-                              (struct sockaddr *)&address, sizeof(address));
-            if (sent == (int)wire_bytes) break;
-            int error = sent < 0 ? errno : EIO;
-            if (attempts++ == 0) {
-                __atomic_fetch_add(&b->send_errors, 1, __ATOMIC_RELAXED);
-                __atomic_store_n(&b->last_send_errno, error, __ATOMIC_RELAXED);
-            }
-            bool retryable = error == ENOMEM || error == ENOBUFS || error == EAGAIN;
-            if (!retryable || now >= deadline || attempts >= 3) {
-                __atomic_fetch_add(&b->send_drops, 1, __ATOMIC_RELAXED);
-                break;
-            }
-            vTaskDelay(1);
+            send_audio((uint8_t *)&encoded, sizeof(packet_header_t) + packed, epoch, packet.header.delivery_time_us, b);
+        } else {
+            send_audio((uint8_t *)&packet, sizeof(packet_header_t) + bytes, epoch, packet.header.delivery_time_us, b);
         }
     }
 }
@@ -418,10 +461,14 @@ static void subscriber_task(void *arg) {
     while (1) {
         char data[32];struct sockaddr_in source;socklen_t len=sizeof(source);
         int n=recvfrom(udp_sock,data,sizeof(data),0,(struct sockaddr*)&source,&len);
-        if (n>=5 && !memcmp(data,"HELLO",5)) {
+        if (n == 4 && !memcmp(data, "CAPS", 4)) {
+            sendto(udp_sock, "CAPS PCM16", 10, 0, (struct sockaddr *)&source, len);
+        } else if ((n == 5 && !memcmp(data,"HELLO",5)) || (n == 7 && !memcmp(data,"HELLO16",7))) {
+            bool compact = n == 7;
             taskENTER_CRITICAL(&subscriber_mux);
             bool changed = !subscribed || source.sin_addr.s_addr != subscriber.sin_addr.s_addr ||
-                           source.sin_port != subscriber.sin_port;
+                           source.sin_port != subscriber.sin_port || compact != __atomic_load_n(&compact_subscription, __ATOMIC_RELAXED);
+            __atomic_store_n(&compact_subscription, compact, __ATOMIC_RELAXED);
             if (changed) subscriber_epoch++;
             subscriber = source;
             subscribed = true;

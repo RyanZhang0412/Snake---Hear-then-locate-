@@ -64,11 +64,16 @@ class Localizer:
         self.band = (np.fft.rfftfreq(self.frame, 1 / RATE) >= 450) & (
             np.fft.rfftfreq(self.frame, 1 / RATE) <= 3800)
         self.taper = np.hanning(self.frame)
+        # ClapMonitor.direct_arrival places onset at sample 144. Favor the first
+        # few milliseconds, with the same noise-power scale as the full window.
+        self.clap_taper = np.zeros(self.frame)
+        self.clap_taper[32:288] = np.hanning(256)
+        self.clap_taper *= np.linalg.norm(self.taper) / np.linalg.norm(self.clap_taper)
 
-    def measure(self, audio, noise=None):
+    def measure(self, audio, noise=None, *, taper=None):
         x = audio.astype(float).T
         frames = np.lib.stride_tricks.sliding_window_view(x, self.frame, axis=-1)[:, ::256]
-        spectrum = np.fft.rfft(frames * self.taper, axis=-1)
+        spectrum = np.fft.rfft(frames * (self.taper if taper is None else taper), axis=-1)
         power = np.abs(spectrum) ** 2
         band_power = power[:, :, self.band].sum(axis=-1).mean(axis=1)
         levels = 10 * np.log10(np.maximum(np.median(band_power.reshape(2, 4), axis=1), 1.))
@@ -94,6 +99,15 @@ class Localizer:
 
     def correlations(self, audio, noise=None):
         return self.measure(audio, noise)[0]
+
+    def clap_direction(self, audio, phase, offset, noise=None):
+        correlations, _, _ = self.measure(audio, noise, taper=self.clap_taper)
+        if correlations is None:
+            return None
+        estimate = self.direction(correlations, phase, offset)
+        if estimate["azimuth"] is not None or estimate["elevation"] is not None:
+            return estimate
+        return None
 
     def reference_offset(self, correlations, phase):
         """At the middle plane, vertically matched microphones are equidistant."""

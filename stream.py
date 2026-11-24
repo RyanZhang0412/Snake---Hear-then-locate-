@@ -44,6 +44,37 @@ def packet_fields(packet):
     return int(magic == b"XVF2"), (start, count, sequence, delivered, overflows, block.reshape(count, 2))
 
 
+def datagram_records(data):
+    if not data.startswith(b"X16B"):
+        return [packet_fields(data)]
+    records = []
+    pos = 4
+    while pos < len(data):
+        if len(records) == 3 or len(data) - pos < HEADER.size + 2:
+            raise ValueError("invalid compact header")
+        magic, seq, start, count, size, delivered, overflow = HEADER.unpack_from(data, pos)
+        pos += HEADER.size
+        first, shift = data[pos:pos + 2]
+        if magic not in (b"XVF1", b"XVF2") or not 3 <= count <= 128 or first > 2 or shift > 16:
+            raise ValueError("invalid compact format")
+        extra = (count + 2 - first) // 3
+        if size != 2 + 2 * (count + extra) or pos + size > len(data):
+            raise ValueError("invalid compact payload")
+        values = np.frombuffer(data, dtype="<i2", count=count + extra, offset=pos + 2).astype(np.int32)
+        values <<= shift
+        idx = np.arange(count)
+        left = idx + (idx + 2 - first) // 3
+        marked = idx % 3 != first
+        block = np.ones((count, 2), dtype=np.int32)
+        block[:, 0] = (values[left] & -2) | marked
+        block[first::3, 1] = values[left[first::3] + 1] & -2
+        records.append((int(magic == b"XVF2"), (start, count, seq, delivered, overflow, block)))
+        pos += size
+    if not records:
+        raise ValueError("empty compact datagram")
+    return records
+
+
 class CommonWindows:
     def __init__(self):
         self.pending = [{}, {}]
@@ -156,12 +187,21 @@ def prepare_esp(port, status, cancelled):
         raise
 
 
-def receive(host, cancelled, on_window, on_status, on_overflow):
+def receive(host, cancelled, on_window, on_status, on_overflow, requested_format):
     address = (socket.gethostbyname(host), UDP_PORT)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 1024 * 1024)
         sock.settimeout(.5)
         sock.sendto(b"HELLO", address)
+        sock.sendto(b"CAPS", address)
+        capable = False
+        last_caps = time.monotonic()
+        requested = active = "original"
+        wire_bytes = datagrams = received = missing = 0
+        prev_seq = [None, None]
+        last_rate = time.monotonic()
+        rate_bytes = 0
+        mbps = None
         windows = CommonWindows()
         last_packet = [0., 0.]
         last_counters = 0.
@@ -173,23 +213,48 @@ def receive(host, cancelled, on_window, on_status, on_overflow):
                 except socket.timeout:
                     data, peer = b"", None
                 now = time.monotonic()
-                if now - min(last_packet) > 1.5 and now - last_hello > 1:
-                    sock.sendto(b"HELLO", address)
+                if not capable and now - last_caps >= 3:
+                    sock.sendto(b"CAPS", address)
+                    last_caps = now
+                target = requested_format() if capable else "original"
+                retry = (now - min(last_packet) > 1.5 or target != active) and now - last_hello > 1
+                if requested != target or retry:
+                    sock.sendto(b"HELLO16" if target == "pcm16" else b"HELLO", address)
+                    requested = target
                     last_hello = now
-                if peer and peer[0] == address[0]:
+                if peer == address and data == b"CAPS PCM16":
+                    capable = True
+                elif peer == address:
                     try:
-                        board, packet = packet_fields(data)
+                        records = datagram_records(data)
                     except ValueError:
                         continue
-                    last_packet[board] = now
-                    result, overflow = windows.add(board, packet)
-                    if overflow:
-                        on_overflow()
-                    if result is not None:
-                        on_window(result)
+                    active = "pcm16" if data.startswith(b"X16B") else "original"
+                    wire_bytes += len(data) + 28  # UDP and IPv4 headers
+                    datagrams += 1
+                    for board, packet in records:
+                        seq = packet[2]
+                        prior = prev_seq[board]
+                        delta = 1 if prior is None else (seq - prior) & 0xffffffff
+                        if 0 < delta < 0x80000000:
+                            missing += delta - 1
+                            received += 1
+                            prev_seq[board] = seq
+                        last_packet[board] = now
+                        result, overflow = windows.add(board, packet)
+                        if overflow:
+                            on_overflow()
+                        if result is not None:
+                            on_window(result)
+                if now - last_rate >= 2:
+                    mbps = round((wire_bytes - rate_bytes) * 8e-6 / (now - last_rate), 3)
+                    last_rate, rate_bytes = now, wire_bytes
                 if now - last_counters > .25:
                     on_status([now - instant < 1.5 for instant in last_packet],
-                              windows.gaps, windows.format_skips)
+                              windows.gaps, windows.format_skips, dict(
+                                  format_available=capable, format_active=active, wifi_mbps=mbps,
+                                  wifi_bytes=wire_bytes, wifi_datagrams=datagrams,
+                                  wifi_records=received, wifi_missing=missing))
                     last_counters = now
         finally:
             sock.sendto(b"STOP", address)

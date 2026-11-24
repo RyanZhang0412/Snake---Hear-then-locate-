@@ -28,6 +28,16 @@ button:disabled { cursor: default; }
 
 h1 { margin: 0; font-size: 24px; font-weight: 600; }
 
+.header-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 13px;
+}
+.header-controls .mode { margin-right: 8px; }
+.masthead:has(.header-controls) { flex-wrap: wrap; }
+
 .mode, .stage-head, .meter p, .help, .boards, .stats, summary {
     color: #555;
     font-size: 13px;
@@ -95,6 +105,32 @@ aside {
 
 .meter p, .help, .stats { margin: 0; }
 
+.clap-readout table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+.clap-readout th, .clap-readout td {
+    padding: 5px 2px;
+    text-align: center;
+    border-bottom: 1px solid #e7e7e7;
+}
+.clap-readout th { font-size: 13px; }
+.clap-readout .direction-number {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+}
+.direction-one { background: #1167ad; }
+.direction-two { background: #a4450b; }
+.direction-three { background: #1c7347; }
+.direction-four { background: #7846a4; }
+
 .signal {
     border-top: 1px solid #ddd;
     margin-top: 16px;
@@ -120,6 +156,10 @@ summary { cursor: pointer; }
 
 .level { margin-top: 12px; font-variant-numeric: tabular-nums; }
 .level progress { width: 100%; height: 9px; margin-top: 4px; accent-color: #333; }
+.audio-preview { margin: 12px 0; }
+#preview-controls { margin-top: 6px; }
+#preview-controls [aria-pressed="true"] { font-weight: 700; }
+#preview-player { display: block; width: 100%; height: 34px; margin-top: 6px; }
 .clap { margin: 9px 0; color: #555; }
 .clap .detected { color: #202020; font-weight: 700; }
 .setting { margin: 8px 0; }

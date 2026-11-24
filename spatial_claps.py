@@ -2,6 +2,7 @@
 import numpy as np
 
 from localize import RATE
+from sound_events import matching_impulse
 
 MAX_PLAYERS = 4
 MIN_SEPARATION = np.cos(np.deg2rad(34.))
@@ -118,6 +119,30 @@ class SpatialClaps:
                 break
         return selected
 
+    def direct_sources(self, selected, observed, sectors):
+        if len(selected) < 2:
+            return range(len(selected))
+        fitted, _ = self.fit(self.atoms[selected, :, sectors], observed)
+        spectra = np.zeros((len(selected), len(self.band)), dtype=complex)
+        spectra[:, self.band] = fitted.T
+        waveforms = np.fft.irfft(spectra, n=len(self.taper), axis=1)
+        kept = []
+        for index, waveform in enumerate(waveforms):
+            echoes = []
+            for earlier in kept:
+                lag = matching_impulse(waveforms[earlier], waveform, RATE // 64)
+                if lag is None:
+                    continue
+                if lag >= -(RATE // 1000):
+                    break
+                echoes.append(earlier)
+            else:
+                # When a wall reflection is louder, the beam search can find it
+                # first. Retain the earlier copy when its lead exceeds 1 ms.
+                kept = [earlier for earlier in kept if earlier not in echoes]
+                kept.append(index)
+        return kept
+
     def estimate(self, audio, phase, offset, noise=None):
         spectrum = np.fft.rfft(audio * self.taper[:, None], axis=0)[self.band]
         if noise is not None:
@@ -155,6 +180,7 @@ class SpatialClaps:
         if not selected:
             return []
         selected = self.refine(selected, weighted, allowed, sectors)
+        direct = self.direct_sources(selected, weighted, sectors)
         if offset is None:
             fits = [self.fit(self.atoms[selected, :, board], spectrum[:, board])[0]
                     for board in (slice(0, 4), slice(4, 8))]
@@ -165,7 +191,7 @@ class SpatialClaps:
         # Parseval with the taper's energy and int32 PCM scale removed.
         rms = np.sqrt(2 * energy / (len(self.taper) * np.sum(self.taper ** 2))) / (2 ** 31)
         return [{
-            "azimuth": float(self.azimuth[index]),
-            "elevation": None if offset is None else float(self.elevation[index]),
-            "rms": float(level),
-        } for index, level in zip(selected, rms) if np.isfinite(level) and level > 0.]
+            "azimuth": float(self.azimuth[selected[i]]),
+            "elevation": None if offset is None else float(self.elevation[selected[i]]),
+            "rms": float(rms[i]),
+        } for i in direct if np.isfinite(rms[i]) and rms[i] > 0.]

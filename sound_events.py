@@ -1,4 +1,5 @@
 """PCM level measurement and local, onset-gated clap classification."""
+from collections import deque
 from pathlib import Path
 import zipfile
 
@@ -11,6 +12,20 @@ BLOCK = 64
 MODEL_SAMPLES = 15600
 MODEL_TAIL = int(.14 * RATE)
 REFRACTORY = int(.23 * RATE)
+ECHO_TAIL = int(.20 * RATE)
+
+
+def matching_impulse(reference, candidate, max_shift):
+    """Return the sample lag only when the broadband waveforms closely match."""
+    scale = np.linalg.norm(reference) * np.linalg.norm(candidate)
+    if not scale:
+        return None
+    correlation = np.abs(np.correlate(candidate, reference, mode="full"))
+    center = len(reference) - 1
+    lo = max(0, center - max_shift)
+    hi = min(len(correlation), center + max_shift + 1)
+    index = lo + int(np.argmax(correlation[lo:hi]))
+    return index - center if correlation[index] >= .70 * scale else None
 
 
 def pcm_levels(audio):
@@ -71,8 +86,8 @@ class ClapMonitor:
         self.pending = []
         self.last_clap = None
         self.last_preview = None
-        self.last_game_clap = None
         self.examined = None
+        self.recent_claps = deque(maxlen=4)
 
     def _append(self, audio, start):
         if self.start is None or start < self.start or start > self.start + len(self.audio):
@@ -80,6 +95,7 @@ class ClapMonitor:
             self.audio = audio.copy()
             self.pending.clear()
             self.examined = None
+            self.recent_claps.clear()
             return
         count = self.start + len(self.audio) - start
         self.audio = np.concatenate((self.audio, audio[count:]))
@@ -142,10 +158,28 @@ class ClapMonitor:
         chunks = audio[start:peak + 64].astype(float).reshape(-1, 32, 8)
         chunks -= chunks.mean(axis=1, keepdims=True)
         power = np.median(np.mean(chunks ** 2, axis=1).reshape(-1, 2, 4), axis=2)
-        early = np.flatnonzero(np.all(power >= .18 * power.max(axis=0), axis=1))
+        # The relative peak threshold alone can be below ambient when the clap is soft.
+        threshold = np.maximum(.18 * power.max(axis=0), 1.8 * np.median(power, axis=0))
+        early = np.flatnonzero(np.all(power >= threshold, axis=1))
         onset = start + 32 * int(early[0]) if len(early) else peak
         left = max(0, onset - 144)
         return audio[left:left + 512]
+
+    def repeated_impulse(self, impulse, sample):
+        # Late echoes can trigger a new onset. Compare the same microphones across
+        # the two arrivals and require a waveform match on each independent board.
+        spectrum = np.fft.rfft(impulse, axis=0)
+        frequency = np.fft.rfftfreq(len(impulse), 1 / RATE)
+        spectrum[(frequency < 1000) | (frequency > 6500)] = 0
+        filtered = np.fft.irfft(spectrum, n=len(impulse), axis=0).T
+        while self.recent_claps and sample - self.recent_claps[0][0] > ECHO_TAIL:
+            self.recent_claps.popleft()
+        for _, reference in self.recent_claps:
+            if all(any(matching_impulse(reference[i], filtered[i], 96) is not None
+                       for i in range(first, first + 4)) for first in (0, 4)):
+                return True
+        self.recent_claps.append((sample, filtered))
+        return False
 
     def process(self, audio, start, sensitivity, *, collect_game=False):
         self._append(audio, start)
@@ -171,9 +205,7 @@ class ClapMonitor:
             candidate, rise = self.pending.pop(0)
             self.examined = candidate
             display = self.last_clap is None or candidate - self.last_clap >= REFRACTORY
-            game = collect_game and (self.last_game_clap is None or
-                                     candidate - self.last_game_clap >= int(.075 * RATE))
-            if not display and not game:
+            if not display and not collect_game:
                 continue
             index = candidate - self.start
             # The short direct arrival is more useful for direction than the full classifier context.
@@ -190,16 +222,17 @@ class ClapMonitor:
                 kind = "possible"
             else:
                 kind = None
-            # Single claps can fall below a whole-scene classifier's threshold.
-            # High mode can send a strong, unvetoed impulse to the spatial validator.
-            accept_game = game and (kind is not None or sensitivity == "high" and rise >= 9.)
+            # For weak, unvetoed attacks in high mode, let the array's timing
+            # agreement decide. The caller uses a stricter score for these.
+            accept_game = collect_game and (kind is not None or sensitivity == "high" and rise >= 5.5)
             if kind is None and not accept_game:
                 continue
             arrival = self.direct_arrival(self.audio, index)
+            if self.repeated_impulse(arrival, candidate):
+                continue
             if display and kind is not None:
                 self.last_clap = candidate
                 events.append((kind, arrival, rise, candidate))
             if accept_game:
-                self.last_game_clap = candidate
-                events.append(("game", arrival, rise, candidate))
+                events.append(("game" if kind else "weak_game", arrival, rise, candidate))
         return events

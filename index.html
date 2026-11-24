@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>双板声源定位</title>
+  <title data-zh="双板声源定位">Dual-array sound localization</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/sphere.js" defer></script>
   <script src="/ui.js" defer></script>
@@ -11,70 +11,105 @@
 <body>
   <main class="console">
     <header class="masthead">
-      <h1>双板声源定位</h1>
-      <div class="mode"><a href="/snake">贪吃蛇</a> · <span id="mode">连接中</span></div>
+      <h1 data-zh="双板声源定位">Dual-array sound localization</h1>
+      <div class="header-controls">
+        <div class="mode" id="mode" data-zh="连接中">Connecting…</div>
+        <label for="language" data-zh="语言">Language</label>
+        <select id="language">
+          <option value="en" lang="en">English</option>
+          <option value="zh-CN" lang="zh-CN">中文</option>
+        </select>
+      </div>
     </header>
     <div class="dashboard">
-      <section class="stage" aria-label="声源方向的完整球面图">
+      <section class="stage" aria-label="Full sphere showing sound direction" data-zh-label="声源方向的完整球面图">
         <div class="stage-head">
-          <span>拖动球面旋转</span>
-          <button id="reset">复位视角</button>
+          <span data-zh="拖动球面旋转">Drag the sphere to rotate</span>
+          <button id="reset" data-zh="复位视角">Reset view</button>
         </div>
-        <canvas id="sphere" tabindex="0" aria-label="完整方向球，拖动或用方向键旋转"></canvas>
+        <canvas id="sphere" tabindex="0" aria-label="Direction sphere. Drag or use the arrow keys to rotate." data-zh-label="完整方向球，拖动或用方向键旋转"></canvas>
       </section>
       <aside>
-        <section class="readout" aria-label="实时角度">
+        <section id="continuous-readout" class="readout" aria-label="Live angles" data-zh-label="实时角度">
           <div class="meter">
-            <label for="azimuth">方位角</label>
+            <label for="azimuth" data-zh="方位角">Azimuth</label>
             <output id="azimuth" aria-live="off">—</output>
-            <p>USB‑C 方向为 0°</p>
+            <p data-zh="USB‑C 方向为 0°">0° points toward USB‑C</p>
           </div>
           <div class="meter">
-            <label for="elevation">俯仰角</label>
+            <label for="elevation" data-zh="俯仰角">Elevation</label>
             <output id="elevation" aria-live="off">—</output>
-            <p>水平为 0°，向上为正</p>
+            <p data-zh="水平为 0°，向上为正">0° is horizontal. Positive angles point up.</p>
           </div>
+        </section>
+        <section id="clap-readout" class="clap-readout" aria-label="Detected directions" data-zh-label="触发方向" hidden>
+          <table>
+            <thead><tr><th scope="col" data-zh="方向">Direction</th><th scope="col" data-zh="方位角">Azimuth</th><th scope="col" data-zh="俯仰角">Elevation</th></tr></thead>
+            <tbody id="clap-directions"></tbody>
+          </table>
+          <p class="help" data-zh="USB‑C 方向为 0°，俯仰向上为正">0° points toward USB‑C. Positive elevation points up.</p>
         </section>
         <section id="live-panel" class="signal" hidden>
           <p id="status" class="status"></p>
           <div class="boards">
-            <span>上板 <span id="board-a">离线</span></span>
-            <span>下板 <span id="board-b">离线</span></span>
+            <span><span data-zh="上板">Upper board</span> <span id="board-a" data-zh="离线">Offline</span></span>
+            <span><span data-zh="下板">Lower board</span> <span id="board-b" data-zh="离线">Offline</span></span>
           </div>
+          <p class="setting"><label for="trigger_input" data-zh="触发方式">Trigger</label>
+            <select id="trigger_input"><option id="voice-option" value="speech" data-zh="语音 · Snake">Voice · Snake</option><option value="clap" data-zh="拍手">Clap</option></select>
+          </p>
+          <p class="setting"><label for="denoise" data-zh="背景降噪">Noise reduction</label><input id="denoise" type="checkbox" checked></p>
           <div class="level">
-            <label for="level-meter">响度</label>
+            <label for="level-meter" data-zh="响度">Sound level</label>
             <output id="level-text" aria-live="off">—</output>
             <progress id="level-meter" max="100" value="0"></progress>
           </div>
           <p id="level-reference" class="help"></p>
-          <p class="clap"><span id="clap-status" aria-live="polite">等待拍手</span><span>已确认 <b id="clap-count">0</b> 次</span></p>
+          <div class="audio-preview">
+            <button id="capture-preview" disabled data-zh="抓取最近 4 秒">Capture last 4 seconds</button>
+            <div id="preview-controls" hidden>
+              <button id="preview-raw" aria-pressed="false" data-zh="听原始">Play original</button>
+              <button id="preview-cleaned" aria-pressed="false" data-zh="听降噪">Play denoised</button>
+              <audio id="preview-player" controls preload="metadata" aria-label="Array audio preview" data-zh-label="阵列收音试听"></audio>
+            </div>
+            <p id="preview-status" class="help" aria-live="polite"></p>
+          </div>
+          <p class="clap"><span id="clap-status" aria-live="polite"></span><span><span data-zh="已确认">Confirmed</span> <b id="clap-count">0</b><span id="speech-attempts" hidden></span></span></p>
           <p id="tracking-note" class="help" aria-live="polite"></p>
-          <button id="calibrate" disabled>校准俯仰零点</button>
-          <p id="calibration-note" class="help">让声源位于两板中间高度，点击后持续发声约 5 秒。</p>
+          <button id="calibrate" disabled data-zh="校准俯仰零点">Calibrate zero elevation</button>
+          <p id="calibration-note" class="help" data-zh="让声源位于两板中间高度，点击后持续发声约 5 秒。">Place the sound source halfway between the boards. Click Calibrate and make a steady sound for about 5 seconds.</p>
           <details>
-            <summary>采集详情</summary>
-            <p class="stats">有效窗口 <b id="windows">0</b> · 中断 <b id="gaps">0</b> · 格式跳过 <b id="skips">0</b></p>
-            <p class="stats">短促声触发 <b id="transient-count">0</b></p>
+            <summary data-zh="采集详情">Capture details</summary>
+            <p class="stats"><span data-zh="有效窗口">Valid windows</span> <b id="windows">0</b> · <span data-zh="中断">Gaps</span> <b id="gaps">0</b> · <span data-zh="格式跳过">Format skips</span> <b id="skips">0</b></p>
+            <p class="stats"><span data-zh="短促声触发">Transient triggers</span> <b id="transient-count">0</b></p>
             <p class="stats" id="geometry"></p>
           </details>
           <details>
-            <summary>声音设置</summary>
-            <p class="setting"><label for="sensitivity">检测灵敏度</label>
-              <select id="sensitivity"><option value="standard">标准</option><option value="high">高</option></select>
+            <summary data-zh="声音设置">Audio settings</summary>
+            <p class="setting"><label for="transport_format" data-zh="Wi-Fi 音频格式">Wi-Fi audio format</label>
+              <select id="transport_format" disabled>
+                <option value="original" data-zh="原始无损 · 16 kHz × 8">Original lossless · 16 kHz × 8</option>
+                <option value="pcm16" data-zh="低带宽 16 位 · 16 kHz × 8">Compact 16-bit · 16 kHz × 8</option>
+              </select>
             </p>
-            <p class="setting"><label for="software_gain_db">电平软件增益</label>
+            <p id="transport-note" class="help" aria-live="polite"></p>
+            <p id="transport-rate" class="help"></p>
+            <p class="setting"><label for="sensitivity" data-zh="检测灵敏度">Sensitivity</label>
+              <select id="sensitivity"><option value="standard" data-zh="标准">Standard</option><option value="high" data-zh="高">High</option></select>
+            </p>
+            <p class="setting"><label for="software_gain_db" data-zh="电平软件增益">Display gain</label>
               <select id="software_gain_db"><option value="0">0 dB</option><option value="6">+6 dB</option><option value="12">+12 dB</option></select>
             </p>
-            <p class="help" id="audio-settings-note">灵敏度影响检测阈值。增益用于响度显示。</p>
+            <p class="help" id="audio-settings-note" data-zh="灵敏度影响检测阈值。增益用于响度显示。">Sensitivity adjusts the detection threshold. Gain adjusts the displayed level.</p>
           </details>
         </section>
         <section id="demo-panel" class="signal" hidden>
           <div class="demo-controls">
-            <button data-el="36">上方</button>
-            <button data-el="0">水平</button>
-            <button data-el="-36">下方</button>
+            <button data-el="36" data-zh="上方">Above</button>
+            <button data-el="0" data-zh="水平">Level</button>
+            <button data-el="-36" data-zh="下方">Below</button>
           </div>
-          <button id="sweep" aria-pressed="false">播放绕场演示</button>
+          <button id="sweep" aria-pressed="false" data-zh="播放绕场演示">Play orbit demo</button>
         </section>
       </aside>
     </div>

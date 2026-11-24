@@ -23,7 +23,7 @@ const equal = (a, b) => a.every((v, i) => v === b[i]);
 const nextCell = (a, step) => a.map((x, i) => x + step[i]);
 
 function vector(azimuth, elevation) {
-    const az = azimuth * Math.PI / 180, el = (elevation ?? 0) * Math.PI / 180;
+    const az = (azimuth ?? 0) * Math.PI / 180, el = (elevation ?? 0) * Math.PI / 180;
     return [Math.cos(az) * Math.cos(el), Math.sin(az) * Math.cos(el), Math.sin(el)];
 }
 
@@ -46,7 +46,8 @@ export class Contest {
     observe(groups, at, now) {
         let decision = this.advance(now);
         const candidates = groups.filter(item =>
-            Number.isFinite(item.azimuth) && Number.isFinite(item.rms) && item.rms > 0 &&
+            (Number.isFinite(item.azimuth) || (item.azimuth === null && Math.abs(item.elevation) === 90)) &&
+            Number.isFinite(item.rms) && item.rms > 0 &&
             (item.elevation == null || Number.isFinite(item.elevation)));
         if (!candidates.length) return decision;
         if (this.phase === "joining" && at - this.joinedAt > JOIN_MS) {

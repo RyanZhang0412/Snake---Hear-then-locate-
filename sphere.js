@@ -6,6 +6,7 @@ class DirectionSphere {
         this.ctx = canvas.getContext("2d");
         this.mesh = this.makeMesh();
         this.angles = { azimuth: null, elevation: null };
+        this.clapDirections = [];
         this.reset();
         new ResizeObserver(() => this.draw()).observe(canvas);
 
@@ -61,8 +62,9 @@ class DirectionSphere {
         this.draw();
     }
 
-    setDirection(angles) {
+    setDirection(angles, clapDirections = []) {
         this.angles = angles;
+        this.clapDirections = clapDirections;
         this.draw();
     }
 
@@ -123,6 +125,31 @@ class DirectionSphere {
             ctx.textAlign = x > cx + 10 ? "left" : x < cx - 10 ? "right" : "center";
             ctx.fillText(az === 0 ? "0° USB" : az + "°",
                 x + (x > cx + 10 ? 7 : x < cx - 10 ? -7 : 0), y + (y > cy ? 15 : -9));
+        }
+
+        if (this.clapDirections.length) {
+            const points = this.clapDirections.map(({ azimuth, elevation, color, number }) => ({
+                position: project(this.vector(azimuth ?? 0, elevation ?? 0)), color, number,
+            }));
+            points.sort((a, b) => a.position[2] - b.position[2]);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.font = "bold 12px system-ui, sans-serif";
+            for (const { position: [x, y, depth], color, number } of points) {
+                ctx.beginPath();
+                ctx.arc(x, y, 10, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.globalAlpha = depth < 0 ? .8 : 1;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = "#fff";
+                ctx.fillText(number, x, y);
+            }
+            ctx.textBaseline = "alphabetic";
+            return;
         }
 
         const { azimuth, elevation } = this.angles;
