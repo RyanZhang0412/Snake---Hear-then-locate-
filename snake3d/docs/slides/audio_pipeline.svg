@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 584" width="1600" height="584" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3a3f4b"/></marker>
+    <marker id="ahO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c8701d"/></marker>
+    <style>
+      .box  { fill: #f6f7f9; stroke: #3a3f4b; stroke-width: 1.4; }
+      .boxO { fill: #fbf2e8; stroke: #c8701d; stroke-width: 1.4; }
+      .boxW { fill: #ffffff; stroke: #9aa0ab; stroke-width: 1.3; stroke-dasharray: 6 4; }
+      .t  { font-size: 19px; font-weight: 700; fill: #1d1f24; text-anchor: middle; }
+      .s  { font-size: 15px; fill: #4a4f5a; text-anchor: middle; }
+      .m  { font-size: 15px; font-style: italic; fill: #3a3f4b; text-anchor: middle; }
+      .lab { font-size: 14px; font-style: italic; fill: #c8701d; }
+      .sec { font-size: 15px; font-weight: 700; fill: #8a8f99; letter-spacing: 1px; }
+      .arr  { stroke: #3a3f4b; stroke-width: 1.7; fill: none; marker-end: url(#ah); }
+      .arrO { stroke: #c8701d; stroke-width: 1.7; fill: none; marker-end: url(#ahO); }
+    </style>
+  </defs>
+  <rect width="1600" height="584" fill="#ffffff"/>
+
+  <text class="sec" x="24" y="40">DIRECTION, EVERY 256 MS WINDOW</text>
+  <!-- main chain -->
+  <rect class="box" x="24" y="64" width="230" height="170" rx="9"/>
+  <text class="t" x="139" y="104">Activity gate</text>
+  <text class="s" x="139" y="136">band level 450–3800 Hz</text>
+  <text class="s" x="139" y="160">vs. learned noise floor</text>
+  <text class="m" x="139" y="196">rise ≥ 4.5 dB</text>
+
+  <rect class="boxO" x="292" y="64" width="300" height="170" rx="9"/>
+  <text class="t" x="442" y="104">Noise-weighted GCC-PHAT</text>
+  <text class="s" x="442" y="136">PHAT cross-spectra per pair,</text>
+  <text class="s" x="442" y="160">down-weight bins near the room noise</text>
+  <text class="m" x="442" y="196">wᵢⱼ(f) = √(eᵢ eⱼ),  e = max(0, 1 − 1.35 N/P)</text>
+
+  <rect class="boxO" x="630" y="64" width="300" height="170" rx="9"/>
+  <text class="t" x="780" y="104">Sphere search (SRP)</text>
+  <text class="m" x="780" y="136">û = argmaxᵤ Σ Rᵢⱼ(τᵢⱼ(u)),  3° grid</text>
+  <text class="s" x="780" y="166">reject if best score &lt; 0.24, or a rival</text>
+  <text class="s" x="780" y="190">≥ 28° away scores within 0.018</text>
+
+  <rect class="box" x="968" y="64" width="300" height="170" rx="9"/>
+  <text class="t" x="1118" y="104">Direction tracker</text>
+  <text class="s" x="1118" y="136">show only if ≥ 3 of the last 5 windows</text>
+  <text class="s" x="1118" y="160">agree within 17°</text>
+  <text class="m" x="1118" y="196">v ← 0.68 v + 0.32 v̂,  reset after 0.68 s</text>
+
+  <rect class="box" x="1306" y="64" width="270" height="170" rx="9" style="fill:#ffffff"/>
+  <text class="t" x="1441" y="104">Output</text>
+  <text class="s" x="1441" y="136">azimuth (clockwise from USB-C)</text>
+  <text class="s" x="1441" y="160">elevation</text>
+  <text class="s" x="1441" y="184">level (dBFS)</text>
+  <text class="lab" x="1441" y="214" style="text-anchor:middle">→ game: azimuth_cw_deg, level</text>
+
+  <path class="arr" d="M256,149 L288,149"/>
+  <path class="arr" d="M594,149 L626,149"/>
+  <path class="arr" d="M932,149 L964,149"/>
+  <path class="arr" d="M1270,149 L1302,149"/>
+
+  <!-- calibration -->
+  <text class="sec" x="630" y="300">ONE-TIME CALIBRATION</text>
+  <rect class="boxW" x="630" y="316" width="300" height="128" rx="9"/>
+  <text class="t" x="780" y="350">Elevation zero</text>
+  <text class="s" x="780" y="380">source at mid-height: 4 vertically aligned</text>
+  <text class="s" x="780" y="404">pairs should show zero delay</text>
+  <text class="m" x="780" y="430">→ inter-board offset (median of votes)</text>
+  <path class="arrO" d="M900,314 L900,238"/>
+  <text class="lab" x="912" y="270">adds 16 cross-board pairs</text>
+  <text class="lab" x="912" y="290">(12 → 28): full sphere, elevation</text>
+
+  <!-- clap branch -->
+  <text class="sec" x="24" y="300">CLAP EVENTS</text>
+  <rect class="box" x="24" y="316" width="230" height="128" rx="9"/>
+  <text class="t" x="139" y="350">Transient detector</text>
+  <text class="s" x="139" y="380">4 ms blocks: sharp rise</text>
+  <text class="s" x="139" y="404">and decay, full band + mid band</text>
+  <rect class="box" x="292" y="316" width="300" height="128" rx="9"/>
+  <text class="t" x="442" y="350">YAMNet classifier</text>
+  <text class="s" x="442" y="380">clapping / applause vs. typing, speech</text>
+  <text class="s" x="442" y="404">(TFLite, on the PC)</text>
+  <path class="arr" d="M206,236 L206,312"/>
+  <path class="arr" d="M256,380 L288,380"/>
+  <rect class="box" x="24" y="482" width="568" height="80" rx="9" style="fill:#ffffff"/>
+  <text class="t" x="308" y="514">Clap event + direction</text>
+  <text class="s" x="308" y="542">direction from the onset segment (direct arrival, before echoes)</text>
+  <path class="arr" d="M442,446 L442,478"/>
+
+  <!-- footnote -->
+  <text x="968" y="530" style="font-size:14px; fill:#8a8f99">Parameters from the localizer code (localize.py, tracking.py,</text>
+  <text x="968" y="552" style="font-size:14px; fill:#8a8f99">sound_events.py): 16 kHz, 512-sample Hann frames, 8× oversampled GCC.</text>
+</svg>
