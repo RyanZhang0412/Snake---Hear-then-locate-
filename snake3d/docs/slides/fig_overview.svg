@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3a3f4b"/></marker>
+    <marker id="ahG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f8a5b"/></marker>
+    <marker id="ahO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c8701d"/></marker>
+    <marker id="ahGr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa0ab"/></marker>
+    <style>
+      .frame { fill: none; stroke: #c3c8d1; stroke-width: 1.5; stroke-dasharray: 6 5; }
+      .box   { fill: #f6f7f9; stroke: #3a3f4b; stroke-width: 1.4; }
+      .boxG  { fill: #eef7f2; stroke: #1f8a5b; stroke-width: 1.4; }
+      .boxO  { fill: #fbf2e8; stroke: #c8701d; stroke-width: 1.4; }
+      .boxS  { fill: #ffffff; stroke: #9aa0ab; stroke-width: 1.2; }
+      .boxD  { fill: #ffffff; stroke: #9aa0ab; stroke-width: 1.2; stroke-dasharray: 5 4; }
+      .reg   { font-size: 21px; font-weight: 700; fill: #1d1f24; }
+      .regs  { font-size: 17px; fill: #5b606b; }
+      .t     { font-size: 17px; font-weight: 700; fill: #1d1f24; text-anchor: middle; }
+      .s     { font-size: 14px; fill: #4a4f5a; text-anchor: middle; }
+      .m     { font-size: 14px; font-style: italic; fill: #3a3f4b; text-anchor: middle; }
+      .mG    { font-size: 14px; font-style: italic; fill: #1f8a5b; text-anchor: middle; }
+      .mO    { font-size: 14px; font-style: italic; fill: #c8701d; text-anchor: middle; }
+      .tag   { font-size: 15px; font-weight: 700; fill: #ffffff; text-anchor: middle; }
+      .tags  { font-size: 12.5px; fill: #ffffff; text-anchor: middle; }
+      .arr   { stroke: #3a3f4b; stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+      .arrG  { stroke: #1f8a5b; stroke-width: 1.8; fill: none; marker-end: url(#ahG); }
+      .arrO  { stroke: #c8701d; stroke-width: 1.8; fill: none; marker-end: url(#ahO); }
+      .arrGr { stroke: #9aa0ab; stroke-width: 1.5; fill: none; marker-end: url(#ahGr); }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="#ffffff"/>
+
+  <!-- (a) offline map construction -->
+  <rect class="frame" x="24" y="22" width="1552" height="236" rx="10"/>
+  <text class="reg" x="44" y="56">(a) Offline map construction</text>
+  <text class="regs" x="358" y="56">lidar scan → static, ground-free point cloud → voxel game level</text>
+
+  <g>
+    <rect class="box" x="46"   y="84" width="214" height="128" rx="8"/>
+    <text class="t" x="153" y="122">Lidar odometry</text>
+    <text class="s" x="153" y="150">Livox Mid-360 + Point-LIO</text>
+    <text class="s" x="153" y="172">20 s · 400 scans · 1.5 M pts</text>
+
+    <rect class="box" x="302"  y="84" width="214" height="128" rx="8"/>
+    <text class="t" x="409" y="122">Temporal persistence</text>
+    <text class="s" x="409" y="150">voxel occupied in ≥ 3 of 5</text>
+    <text class="s" x="409" y="172">time slices → static (79 %)</text>
+
+    <rect class="box" x="558"  y="84" width="214" height="128" rx="8"/>
+    <text class="t" x="665" y="122">Ground removal</text>
+    <text class="s" x="665" y="150">RANSAC on lowest dense slab</text>
+    <text class="s" x="665" y="172">+ least-squares refit</text>
+
+    <rect class="box" x="814"  y="84" width="214" height="128" rx="8"/>
+    <text class="t" x="921" y="122">Height band</text>
+    <text class="s" x="921" y="150">keep 0.05 – 1.5 m</text>
+    <text class="s" x="921" y="172">above the floor plane π</text>
+
+    <rect class="box" x="1070" y="84" width="214" height="128" rx="8"/>
+    <text class="t" x="1177" y="122">Segmentation</text>
+    <text class="s" x="1177" y="150">tall columns → walls</text>
+    <text class="s" x="1177" y="172">DBSCAN clusters → food</text>
+
+    <rect class="box" x="1326" y="84" width="228" height="128" rx="8"/>
+    <text class="t" x="1440" y="122">Voxel level 𝒱</text>
+    <text class="s" x="1440" y="150">10 cm grid, 112 × 112 × 20</text>
+    <text class="s" x="1440" y="172">{free, wall, food₁…₁₅}</text>
+  </g>
+  <path class="arr" d="M262,148 L298,148"/>
+  <path class="arr" d="M518,148 L554,148"/>
+  <path class="arr" d="M774,148 L810,148"/>
+  <path class="arr" d="M1030,148 L1066,148"/>
+  <path class="arr" d="M1286,148 L1322,148"/>
+  <text class="m" x="280" y="138">𝒫ₜ</text>
+  <text class="m" x="792" y="138">π</text>
+
+  <!-- (b) steering signals -->
+  <rect class="frame" x="24" y="284" width="1076" height="594" rx="10"/>
+  <text class="reg" x="44" y="318">(b) Steering signal</text>
+  <text class="regs" x="250" y="318">each mode outputs a direction d ∈ S² and a speed v</text>
+
+  <!-- camera lane -->
+  <rect x="46" y="350" width="118" height="128" rx="8" fill="#1f8a5b"/>
+  <text class="tag" x="105" y="408">Camera</text>
+  <text class="tags" x="105" y="430">ours</text>
+  <rect class="boxG" x="184" y="350" width="190" height="128" rx="8"/>
+  <text class="t" x="279" y="390">RGB frame</text>
+  <text class="s" x="279" y="418">laptop webcam</text>
+  <text class="s" x="279" y="440">≈ 30 fps</text>
+  <rect class="boxG" x="398" y="350" width="190" height="128" rx="8"/>
+  <text class="t" x="493" y="390">Hand landmarks</text>
+  <text class="s" x="493" y="418">MediaPipe Hand Landmarker</text>
+  <text class="s" x="493" y="440">X ∈ ℝ²¹ˣ³ (metric)</text>
+  <rect class="boxG" x="612" y="350" width="190" height="128" rx="8"/>
+  <text class="t" x="707" y="390">Finger direction</text>
+  <text class="s" x="707" y="418">PCA line fit over</text>
+  <text class="s" x="707" y="440">index joints 5 – 8</text>
+  <rect class="boxG" x="826" y="350" width="190" height="128" rx="8"/>
+  <text class="t" x="921" y="390">One-Euro filter</text>
+  <text class="s" x="921" y="418">adaptive low-pass</text>
+  <text class="s" x="921" y="440">+ depth-bias offset</text>
+  <path class="arrG" d="M371,414 L394,414"/>
+  <path class="arrG" d="M590,414 L608,414"/>
+  <path class="arrG" d="M804,414 L822,414"/>
+
+  <!-- audio lane -->
+  <rect x="46" y="512" width="118" height="128" rx="8" fill="#c8701d"/>
+  <text class="tag" x="105" y="570">Audio</text>
+  <text class="tags" x="105" y="592">teammate</text>
+  <rect class="boxO" x="184" y="512" width="190" height="128" rx="8"/>
+  <text class="t" x="279" y="552">8-mic array</text>
+  <text class="s" x="279" y="580">2 × XVF3800 + ESP32</text>
+  <text class="s" x="279" y="602">Wi-Fi UDP, 16 kHz</text>
+  <rect class="boxO" x="398" y="512" width="190" height="128" rx="8"/>
+  <text class="t" x="493" y="552">GCC-PHAT</text>
+  <text class="s" x="493" y="580">28 microphone pairs</text>
+  <text class="s" x="493" y="602">450 – 3800 Hz</text>
+  <rect class="boxO" x="612" y="512" width="190" height="128" rx="8"/>
+  <text class="t" x="707" y="552">SRP search</text>
+  <text class="s" x="707" y="580">3° grid on S²</text>
+  <text class="s" x="707" y="602">(azimuth, elevation)</text>
+  <rect class="boxO" x="826" y="512" width="190" height="128" rx="8"/>
+  <text class="t" x="921" y="552">Gate + tracker</text>
+  <text class="s" x="921" y="580">above noise floor;</text>
+  <text class="s" x="921" y="602">3 of 5 windows agree</text>
+  <path class="arrO" d="M371,576 L394,576"/>
+  <path class="arrO" d="M590,576 L608,576"/>
+  <path class="arrO" d="M804,576 L822,576"/>
+  <text class="mO" x="600" y="664">+ clap events: onset detection + YAMNet</text>
+
+  <!-- keyboard / multiplayer -->
+  <rect class="boxS" x="184" y="700" width="832" height="62" rx="8"/>
+  <text class="t" x="420" y="737" style="font-size:16px">Keyboard</text>
+  <text class="s" x="700" y="737" style="text-anchor:middle">arrows / WASD + E / Q (debugging)</text>
+  <rect class="boxD" x="184" y="784" width="832" height="62" rx="8"/>
+  <text class="t" x="420" y="821" style="font-size:16px; fill:#7a7f8c">Multiplayer</text>
+  <text class="s" x="700" y="821" style="text-anchor:middle; fill:#7a7f8c">planned: one (d, v) per player</text>
+
+  <!-- (c) game engine -->
+  <rect class="frame" x="1128" y="284" width="448" height="594" rx="10"/>
+  <text class="reg" x="1148" y="318">(c) Game engine</text>
+  <text class="regs" x="1318" y="318">browser, per frame</text>
+
+  <rect class="box" x="1220" y="342" width="320" height="64" rx="8" style="fill:#ffffff"/>
+  <text class="t" x="1380" y="368">Mode select</text>
+  <text class="m" x="1380" y="392">(d, v) from the active input</text>
+  <rect class="box" x="1220" y="432" width="320" height="88" rx="8"/>
+  <text class="t" x="1380" y="464">Heading update</text>
+  <text class="m" x="1380" y="494">h ← rotate(h → d),  |Δθ| ≤ ω_max Δt</text>
+  <rect class="box" x="1220" y="546" width="320" height="88" rx="8"/>
+  <text class="t" x="1380" y="578">Motion + collision in 𝒱</text>
+  <text class="m" x="1380" y="608">p ← p + v h Δt;  walls block, slide</text>
+  <rect class="box" x="1220" y="660" width="320" height="88" rx="8"/>
+  <text class="t" x="1380" y="692">Eat and grow</text>
+  <text class="s" x="1380" y="722">objects +5, random pellets +1</text>
+  <rect class="box" x="1220" y="774" width="320" height="88" rx="8"/>
+  <text class="t" x="1380" y="806">Render</text>
+  <text class="s" x="1380" y="836">WebGL point cloud, fixed camera</text>
+  <path class="arr" d="M1380,408 L1380,428"/>
+  <path class="arr" d="M1380,522 L1380,542"/>
+  <path class="arr" d="M1380,636 L1380,656"/>
+  <path class="arr" d="M1380,750 L1380,770"/>
+
+  <!-- signals into the game: each lane joins a bus, one arrow into mode select -->
+  <path d="M1020,414 L1172,414" stroke="#1f8a5b" stroke-width="1.8" fill="none"/>
+  <text class="mG" x="1090" y="404">d_cam, v = const</text>
+  <path d="M1020,576 L1172,576" stroke="#c8701d" stroke-width="1.8" fill="none"/>
+  <text class="mO" x="1090" y="548">d_aud,</text>
+  <text class="mO" x="1090" y="566">v = f(loudness)</text>
+  <path d="M1018,731 L1172,731" stroke="#9aa0ab" stroke-width="1.5" fill="none"/>
+  <path d="M1018,815 L1172,815" stroke="#9aa0ab" stroke-width="1.5" fill="none" stroke-dasharray="5 4"/>
+  <path d="M1172,815 L1172,374" stroke="#3a3f4b" stroke-width="1.8" fill="none"/>
+  <circle cx="1172" cy="414" r="3.5" fill="#1f8a5b"/><circle cx="1172" cy="576" r="3.5" fill="#c8701d"/>
+  <circle cx="1172" cy="731" r="3.5" fill="#9aa0ab"/><circle cx="1172" cy="815" r="3.5" fill="#9aa0ab"/>
+  <path class="arr" d="M1172,374 L1216,374"/>
+
+  <!-- level into the collision step, routed down the right side -->
+  <path class="arr" d="M1440,214 L1440,262 L1562,262 L1562,590 L1544,590"/>
+  <text class="m" x="1552" y="430" style="text-anchor:end">𝒱</text>
+</svg>
