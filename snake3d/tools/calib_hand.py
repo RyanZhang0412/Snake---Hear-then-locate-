@@ -141,7 +141,17 @@ for i, (key, name, col) in enumerate(series):
     v = [res[c][key] for c in cats]
     bars = ax.bar(x + (i - 0.5) * w, v, w - 0.04, color=col, label=name, zorder=3)
     for b_, val in zip(bars, v):
-        ax.text(b_.get_x() + b_.get_width() / 2, val + 1, f"{val:.0f}", ha="center", va="bottom", fontsize=10.5, color=INK)
+        cx = b_.get_x() + b_.get_width() / 2
+        if val < 1:   # a zero-height bar is invisible: mark it on the baseline instead
+            ax.plot([b_.get_x(), b_.get_x() + b_.get_width()], [0, 0], color=col, lw=5, solid_capstyle="butt", zorder=4)
+        ax.text(cx, val + 1, f"{val:.0f}°" if val < 1 else f"{val:.0f}", ha="center", va="bottom",
+                fontsize=12 if val < 1 else 10.5, fontweight="bold" if val < 1 else "normal", color=col if val < 1 else INK)
+fb = [i for i, c in enumerate(cats) if c in ("forward (screen)", "back (you)")]
+if fb:   # the selling point: directions 2D cannot measure at all
+    ax.axvspan(min(fb) - 0.5, max(fb) + 0.5, color="#2a78d6", alpha=0.07, zorder=0)
+    ax.text((min(fb) + max(fb)) / 2, 50, "2D cannot see\nforward / back.\n3D can.", ha="center", va="center",
+            fontsize=12, color="#1c5cab", fontweight="bold",
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#9ec5f4"), zorder=5)
 ax.set_xticks(x, [SHORT.get(c, c) if c != "all" else "all\ndirections" for c in cats], color=INK)
 ax.set_ylabel("mean angle error on test samples (°)", color=MUTED)
 ax.grid(axis="y", color="#e6e6e3", zorder=0)
