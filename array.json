@@ -1,0 +1,7 @@
+{
+  "board_gap_cm": 6.0,
+  "mic_square_side_mm": 66.6,
+  "upper_clockwise_channels": [0, 1, 2, 3],
+  "lower_clockwise_channels": [0, 1, 2, 3],
+  "lower_clockwise_rotation_deg": 0
+}

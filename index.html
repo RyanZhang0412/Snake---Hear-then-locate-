@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>双板声源定位</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/sphere.js" defer></script>
+  <script src="/ui.js" defer></script>
+</head>
+<body>
+  <main class="console">
+    <header class="masthead">
+      <h1>双板声源定位</h1>
+      <div id="mode" class="mode">连接中</div>
+    </header>
+    <div class="dashboard">
+      <section class="stage" aria-label="声源方向的完整球面图">
+        <div class="stage-head">
+          <span>拖动球面旋转</span>
+          <button id="reset">复位视角</button>
+        </div>
+        <canvas id="sphere" tabindex="0" aria-label="完整方向球，拖动或用方向键旋转"></canvas>
+      </section>
+      <aside>
+        <section class="readout" aria-label="实时角度">
+          <div class="meter">
+            <label for="azimuth">方位角</label>
+            <output id="azimuth" aria-live="off">—</output>
+            <p>USB‑C 方向为 0°</p>
+          </div>
+          <div class="meter">
+            <label for="elevation">俯仰角</label>
+            <output id="elevation" aria-live="off">—</output>
+            <p>水平为 0°，向上为正</p>
+          </div>
+        </section>
+        <section id="live-panel" class="signal" hidden>
+          <p id="status" class="status"></p>
+          <div class="boards">
+            <span>上板 <span id="board-a">离线</span></span>
+            <span>下板 <span id="board-b">离线</span></span>
+          </div>
+          <div class="level">
+            <label for="level-meter">响度</label>
+            <output id="level-text" aria-live="off">—</output>
+            <progress id="level-meter" max="100" value="0"></progress>
+          </div>
+          <p id="level-reference" class="help"></p>
+          <p class="clap"><span id="clap-status" aria-live="polite">等待拍手</span><span>已确认 <b id="clap-count">0</b> 次</span></p>
+          <p id="tracking-note" class="help" aria-live="polite"></p>
+          <button id="calibrate" disabled>校准俯仰零点</button>
+          <p id="calibration-note" class="help">让声源位于两板中间高度，点击后持续发声约 5 秒。</p>
+          <details>
+            <summary>采集详情</summary>
+            <p class="stats">有效窗口 <b id="windows">0</b> · 中断 <b id="gaps">0</b> · 格式跳过 <b id="skips">0</b></p>
+            <p class="stats">短促声触发 <b id="transient-count">0</b></p>
+            <p class="stats" id="geometry"></p>
+          </details>
+          <details>
+            <summary>声音设置</summary>
+            <p class="setting"><label for="sensitivity">检测灵敏度</label>
+              <select id="sensitivity"><option value="standard">标准</option><option value="high">高</option></select>
+            </p>
+            <p class="setting"><label for="software_gain_db">电平软件增益</label>
+              <select id="software_gain_db"><option value="0">0 dB</option><option value="6">+6 dB</option><option value="12">+12 dB</option></select>
+            </p>
+            <p class="help" id="audio-settings-note">灵敏度影响检测阈值。增益用于响度显示。</p>
+          </details>
+        </section>
+        <section id="demo-panel" class="signal" hidden>
+          <div class="demo-controls">
+            <button data-el="36">上方</button>
+            <button data-el="0">水平</button>
+            <button data-el="-36">下方</button>
+          </div>
+          <button id="sweep" aria-pressed="false">播放绕场演示</button>
+        </section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>
